@@ -21,6 +21,13 @@ const {
 
 const keys: KeypadKey[] = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#']
 const latestTranscript = computed(() => [...state.transcript].reverse())
+const menuOpen = ref(false)
+const textDisplayVisible = ref(true)
+
+function toggleTextDisplay(): void {
+  textDisplayVisible.value = !textDisplayVisible.value
+  menuOpen.value = false
+}
 
 window.setTimeout(() => {
   booting.value = false
@@ -32,7 +39,7 @@ window.setTimeout(() => {
   <main
     class="app-shell"
     :class="[`mode-${displayMode}`, { booting }]"
-    @click="displayMode === 'black' && restoreDisplay()"
+    @click="menuOpen = false; displayMode === 'black' && restoreDisplay()"
   >
     <section v-if="booting" class="boot-screen" aria-live="polite">
       <div class="brand-mark" aria-label="1st Horrox Mining Limited">
@@ -46,16 +53,33 @@ window.setTimeout(() => {
 
     <section v-else-if="ready" class="terminal" aria-label="Horrox Mining terminal">
       <header class="terminal-header">
-        <div>
-          <p class="eyebrow">1ST HORROX MINING LTD.</p>
-          <h1>CAPTAIN TERMINAL</h1>
+        <div class="header-brand" aria-label="1st Horrox Mining Limited">
+          <span class="header-brand-index">1ST</span>
+          <span class="header-brand-name">
+            <strong>HORROX</strong>
+            <small>MINING LTD.</small>
+          </span>
         </div>
-        <div class="status-lights" aria-label="Facility status nominal">
-          <span></span><span></span><span></span>
+        <div class="terminal-menu" @click.stop>
+          <button
+            class="menu-trigger"
+            type="button"
+            aria-label="Terminal display options"
+            aria-controls="terminal-display-menu"
+            :aria-expanded="menuOpen"
+            @click="menuOpen = !menuOpen"
+          >
+            <span></span><span></span><span></span>
+          </button>
+          <div v-if="menuOpen" id="terminal-display-menu" class="menu-panel">
+            <button type="button" @click="toggleTextDisplay">
+              {{ textDisplayVisible ? 'HIDE TEXT DISPLAY' : 'SHOW TEXT DISPLAY' }}
+            </button>
+          </div>
         </div>
       </header>
 
-      <section class="readout" aria-live="polite">
+      <section v-if="textDisplayVisible" class="readout" aria-live="polite">
         <div class="readout-meta">
           <span>FACILITY AGE {{ facilityAgeHours }}H</span>
           <span>{{ state.autopilotEnabled ? 'AUTOPILOT' : 'CAPTAIN CONTROL' }}</span>
@@ -71,6 +95,10 @@ window.setTimeout(() => {
         <div class="request-state">
           {{ pendingEvent ? `REQUEST OPEN // ${pendingEvent.type.toUpperCase()}` : 'NO CAPTAIN RESPONSE REQUIRED' }}
         </div>
+      </section>
+      <section v-else class="readout-collapsed" aria-label="Text display hidden">
+        <span>TEXT DISPLAY HIDDEN</span>
+        <button type="button" @click="textDisplayVisible = true">SHOW</button>
       </section>
 
       <section class="keypad" aria-label="Terminal keypad">
