@@ -37,7 +37,7 @@ Capacitor + Vue 3 is the approved mobile stack. The first prototype slice includ
 - boot sequence with clearly labeled placeholder branding
 - touchscreen and physical-keyboard/numpad command routing
 - data-driven terminal commands, miners, voice profiles, and events
-- system text-to-speech with priority queueing and ambience ducking
+- system text-to-speech with a distinct onboarding voice, voice profiles, priority queueing, and ambience ducking
 - resumable/skippable onboarding using the real keypad
 - mining, docking, maintenance, non-critical problem, and immediate-safety flows
 - five-minute autonomous resolution

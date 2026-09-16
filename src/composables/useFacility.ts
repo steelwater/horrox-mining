@@ -54,6 +54,7 @@ export function useFacility() {
   }
 
   async function initialize(): Promise<void> {
+    if (ready.value) return
     const now = Date.now()
     const saved = await loadFacility()
     if (saved) {
@@ -67,7 +68,7 @@ export function useFacility() {
       )
     } else {
       state.onboardingStatus = 'active'
-      announce(onboardingSteps[0]!.prompt, 'Onboarding Assistant', 'terminal', 2)
+      announce(onboardingSteps[0]!.prompt, 'Onboarding Assistant', 'onboarding', 2)
     }
     ready.value = true
     scheduleTimers()
@@ -80,7 +81,7 @@ export function useFacility() {
       const result = advanceOnboarding(state.onboardingStatus, state.onboardingStep, key)
       state.onboardingStatus = result.status
       state.onboardingStep = result.step
-      announce(result.message, 'Onboarding Assistant', 'terminal', 2)
+      announce(result.message, 'Onboarding Assistant', 'onboarding', 2)
       await persist()
       return
     }
@@ -169,14 +170,14 @@ export function useFacility() {
 
   function skipOnboarding(): void {
     state.onboardingStatus = 'skipped'
-    announce('Onboarding skipped. Main terminal active. Press 0 to repeat the current message, or 9 for autopilot.', 'Onboarding Assistant', 'terminal', 2)
+    announce('Onboarding skipped. Main terminal active. Press 0 to repeat the current message, or 9 for autopilot.', 'Onboarding Assistant', 'onboarding', 2)
     void persist()
   }
 
   function replayOnboarding(): void {
     state.onboardingStatus = 'active'
     state.onboardingStep = 0
-    announce(onboardingSteps[0]!.prompt, 'Onboarding Assistant', 'terminal', 2)
+    announce(onboardingSteps[0]!.prompt, 'Onboarding Assistant', 'onboarding', 2)
     void persist()
   }
 
@@ -205,7 +206,6 @@ export function useFacility() {
 
   onMounted(() => {
     window.addEventListener('keydown', onKeydown)
-    void initialize()
   })
 
   onBeforeUnmount(() => {
@@ -218,6 +218,7 @@ export function useFacility() {
   return {
     state,
     ready,
+    initialize,
     displayMode,
     pendingEvent,
     onboardingActive,

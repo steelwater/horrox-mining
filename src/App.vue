@@ -7,6 +7,7 @@ const booting = ref(true)
 const {
   state,
   ready,
+  initialize,
   displayMode,
   pendingEvent,
   onboardingActive,
@@ -23,6 +24,7 @@ const latestTranscript = computed(() => [...state.transcript].reverse())
 
 window.setTimeout(() => {
   booting.value = false
+  void initialize()
 }, 2200)
 </script>
 

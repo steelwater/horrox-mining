@@ -2,6 +2,14 @@ import type { EventDefinition, Miner, VoiceProfile } from './types'
 
 export const voiceProfiles: VoiceProfile[] = [
   {
+    id: 'onboarding',
+    locale: 'en',
+    rate: 0.96,
+    pitch: 1.08,
+    preferredNameHints: ['Samantha', 'Tessa', 'Moira'],
+    fallbackOrder: ['en-GB', 'en-US'],
+  },
+  {
     id: 'terminal',
     locale: 'en',
     rate: 0.92,
