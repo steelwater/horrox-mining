@@ -1,5 +1,6 @@
 import { voiceProfiles } from '../game/content'
 import type { AudioPriority, VoiceProfile } from '../game/types'
+import { canUseNativeSpeech, speakNatively, stopNativeSpeech } from './nativeSpeech'
 
 type SpeechRequest = {
   text: string
@@ -46,13 +47,32 @@ export class AudioDirector {
     this.ambienceGain = gain
   }
 
+  playKeyTone(key: string): void {
+    if (!this.context) return
+
+    const oscillator = this.context.createOscillator()
+    const gain = this.context.createGain()
+    const keyIndex = '123456789*0#'.indexOf(key)
+    oscillator.type = 'sine'
+    oscillator.frequency.value = keyIndex >= 0 ? 420 + keyIndex * 22 : 420
+    gain.gain.setValueAtTime(0.08, this.context.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, this.context.currentTime + 0.08)
+    oscillator.connect(gain)
+    gain.connect(this.context.destination)
+    oscillator.start()
+    oscillator.stop(this.context.currentTime + 0.08)
+  }
+
   speak(text: string, profileId = 'terminal', priority: AudioPriority = 3): void {
-    if (typeof speechSynthesis === 'undefined') return
+    const nativeSpeech = canUseNativeSpeech()
+    if (!nativeSpeech && typeof speechSynthesis === 'undefined') return
 
     if (this.speaking && this.currentPriority !== null && priority < this.currentPriority) {
-      speechSynthesis.cancel()
-      this.speaking = false
       this.queue.unshift({ text, profileId, priority })
+      if (!nativeSpeech && typeof speechSynthesis !== 'undefined') {
+        speechSynthesis.cancel()
+        this.speaking = false
+      }
     } else {
       this.queue.push({ text, profileId, priority })
       this.queue.sort((a, b) => a.priority - b.priority)
@@ -63,17 +83,40 @@ export class AudioDirector {
   stop(): void {
     this.queue = []
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
+    void stopNativeSpeech()
     this.speaking = false
     this.currentPriority = null
     this.setAmbienceLevel(0.025)
   }
 
   private playNext(): void {
-    if (this.speaking || typeof speechSynthesis === 'undefined') return
+    if (this.speaking) return
     const request = this.queue.shift()
     if (!request) return
 
     const profile = voiceProfiles.find((item) => item.id === request.profileId) ?? voiceProfiles[0]!
+    this.speaking = true
+    this.currentPriority = request.priority
+    this.setAmbienceLevel(0.008)
+
+    if (canUseNativeSpeech()) {
+      void speakNatively({
+        text: request.text,
+        locale: profile.fallbackOrder[0] ?? profile.locale,
+        rate: profile.rate,
+        pitch: profile.pitch,
+      }).then(
+        () => this.finishSpeech(),
+        () => this.finishSpeech(),
+      )
+      return
+    }
+
+    if (typeof speechSynthesis === 'undefined') {
+      this.finishSpeech()
+      return
+    }
+
     const utterance = new SpeechSynthesisUtterance(request.text)
     utterance.rate = profile.rate
     utterance.pitch = profile.pitch
@@ -82,9 +125,6 @@ export class AudioDirector {
     utterance.onend = () => this.finishSpeech()
     utterance.onerror = () => this.finishSpeech()
 
-    this.speaking = true
-    this.currentPriority = request.priority
-    this.setAmbienceLevel(0.008)
     speechSynthesis.speak(utterance)
   }
 

@@ -76,6 +76,7 @@ export function useFacility() {
 
   async function pressKey(key: KeypadKey): Promise<void> {
     await audio.startAmbience()
+    audio.playKeyTone(key)
 
     if (state.onboardingStatus === 'active') {
       const result = advanceOnboarding(state.onboardingStatus, state.onboardingStep, key)
