@@ -31,4 +31,35 @@ The north-star test is:
 
 ## Current status
 
-Repository initialized. Mobile framework selection and implementation scaffolding are pending the Captain's decision.
+Capacitor + Vue 3 is the approved mobile stack. The first prototype slice includes:
+
+- Android and iOS native shells
+- boot sequence with clearly labeled placeholder branding
+- touchscreen and physical-keyboard/numpad command routing
+- data-driven terminal commands, miners, voice profiles, and events
+- system text-to-speech with priority queueing and ambience ducking
+- resumable/skippable onboarding using the real keypad
+- mining, docking, maintenance, non-critical problem, and immediate-safety flows
+- five-minute autonomous resolution
+- autopilot activity, passive chatter, local persistence, and reconnect summaries
+- standard, dim, and black-screen display modes
+- optional transcript/history
+
+Prototype miner names and dialogue are placeholders pending content-owner approval. The official logo asset is also still required.
+
+## Development
+
+```sh
+npm install
+npm run dev
+npm test
+npm run typecheck
+npm run build
+npm run cap:sync
+```
+
+For Android builds on this machine, use Android Studio's bundled JDK:
+
+```sh
+JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" npm run android:debug
+```

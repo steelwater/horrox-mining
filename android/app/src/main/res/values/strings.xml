@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">1st Horrox Mining Ltd.</string>
+    <string name="title_activity_main">1st Horrox Mining Ltd.</string>
+    <string name="package_name">ltd.horrox.mining</string>
+    <string name="custom_url_scheme">ltd.horrox.mining</string>
+</resources>
