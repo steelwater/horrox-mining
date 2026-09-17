@@ -78,6 +78,7 @@ export function useFacility() {
   }
 
   async function pressKey(key: KeypadKey): Promise<void> {
+    if (!ready.value) return
     await audio.startAmbience()
     audio.playKeyTone(key)
 

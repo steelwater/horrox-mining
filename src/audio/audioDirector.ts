@@ -120,7 +120,12 @@ export class AudioDirector {
         profileId: profile.id,
       }).then(
         () => this.finishSpeech(playbackId),
-        (error) => { console.warn('Speech playback failed', error); this.finishSpeech(playbackId) },
+        (error) => {
+          // Cancellation can settle after the replacement announcement has started.
+          if (playbackId !== this.playbackId) return
+          console.warn('Speech playback failed', error)
+          this.finishSpeech(playbackId)
+        },
       )
       return
     }

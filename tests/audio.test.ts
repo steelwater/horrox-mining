@@ -30,4 +30,28 @@ describe('native speech priority', () => {
     await flush()
     expect(native.speakNatively.mock.calls[2]![0].text).toBe('Next report')
   })
+
+  it('does not restart queued speech after the terminal is stopped', async () => {
+    let finish!: () => void
+    native.speakNatively.mockImplementation(() => new Promise<void>(resolve => { finish = resolve }))
+    native.stopNativeSpeech.mockResolvedValue(undefined)
+    const audio = new AudioDirector()
+    audio.speak('Current report')
+    audio.speak('Queued report')
+    audio.stop()
+    finish()
+    await flush()
+    expect(native.speakNatively).toHaveBeenCalledTimes(1)
+  })
+
+  it('plays the next report after the speech engine rejects a line', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    native.speakNatively.mockRejectedValueOnce(new Error('Voice unavailable')).mockResolvedValue(undefined)
+    const audio = new AudioDirector()
+    audio.speak('Unavailable voice')
+    audio.speak('Next report')
+    await flush()
+    expect(native.speakNatively.mock.calls[1]![0].text).toBe('Next report')
+    warning.mockRestore()
+  })
 })
