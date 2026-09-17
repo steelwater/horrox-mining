@@ -96,9 +96,6 @@ window.setTimeout(() => {
           {{ pendingEvent ? `REQUEST OPEN // ${pendingEvent.type.toUpperCase()}` : 'NO CAPTAIN RESPONSE REQUIRED' }}
         </div>
       </section>
-      <section v-else class="readout-collapsed" aria-label="Text display hidden">
-        <span>TEXT DISPLAY HIDDEN</span>
-      </section>
 
       <section class="keypad" aria-label="Terminal keypad">
         <button
