@@ -31,4 +31,41 @@ The north-star test is:
 
 ## Current status
 
-Repository initialized. Mobile framework selection and implementation scaffolding are pending the Captain's decision.
+Capacitor + Vue 3 is the approved mobile stack. The first prototype slice includes:
+
+- Android and iOS native shells
+- boot sequence with clearly labeled placeholder branding
+- touchscreen and physical-keyboard/numpad command routing
+- data-driven terminal commands, miners, voice profiles, and events
+- system text-to-speech with a distinct onboarding voice, voice profiles, priority queueing, and ambience ducking
+- resumable/skippable onboarding using the real keypad
+- mining, docking, maintenance, non-critical problem, and immediate-safety flows
+- five-minute autonomous resolution
+- autopilot activity, passive chatter, local persistence, and reconnect summaries
+- standard, dim, and black-screen display modes
+- optional transcript/history
+
+Prototype miner names and dialogue are placeholders pending content-owner approval. The official logo asset is also still required.
+
+## Correctness pass (17 September 2026)
+
+The accepted MVP and correctness pass are under review in [PR #1](https://github.com/steelwater/horrox-mining/pull/1). Work on `fix/terminal-correctness` fixes tutorial autopilot activation, tutorial repeat, repeat during pending requests, resumed tutorial prompts, startup ambience, and Android speech interruption. Commands are ignored until the saved facility has loaded, preventing keyboard input during boot from overwriting progress. Android discovers installed offline voices and caches a suitable distinct voice per profile as profiles are first used, reusing voices when the installed selection is limited.
+
+Verification: 21 tests pass, including facility-level autopilot/repeat/resume regressions, boot-input protection, speech-error recovery, stopping queued speech, and delayed speech-callback handling. Production web/type build and Android debug build pass. Emulator logs confirm ambience before keypad input, native docking request repetition, different installed voices for terminal and miner, and native stop followed immediately by safety speech during a reconnect announcement. Hardware Bluetooth input/audio, screen-off behavior, multiple device voice inventories, and iOS runtime verification remain pending. These changes do not expand persisted simulation entities or add accessibility settings.
+
+## Development
+
+```sh
+npm install
+npm run dev
+npm test
+npm run typecheck
+npm run build
+npm run cap:sync
+```
+
+For Android builds on this machine, use Android Studio's bundled JDK:
+
+```sh
+JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" npm run android:debug
+```
