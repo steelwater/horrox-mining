@@ -98,7 +98,6 @@ window.setTimeout(() => {
       </section>
       <section v-else class="readout-collapsed" aria-label="Text display hidden">
         <span>TEXT DISPLAY HIDDEN</span>
-        <button type="button" @click="textDisplayVisible = true">SHOW</button>
       </section>
 
       <section class="keypad" aria-label="Terminal keypad">

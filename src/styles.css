@@ -58,7 +58,7 @@ button { font: inherit; }
 .menu-trigger { display: flex; gap: 5px; align-items: center; min-width: 44px; min-height: 44px; justify-content: flex-end; border: 0; background: transparent; cursor: pointer; }
 .menu-trigger span { width: 7px; height: 7px; background: #82e49e; border-radius: 50%; box-shadow: 0 0 9px #82e49e; }
 .menu-panel { position: absolute; z-index: 2; top: calc(100% + 5px); right: 0; width: max-content; padding: 6px; border: 1px solid #3d7350; background: #06140b; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6); }
-.menu-panel button, .readout-collapsed button { border: 0; background: transparent; color: #82e49e; padding: 10px 12px; font-size: 0.62rem; letter-spacing: 0.1em; cursor: pointer; }
+.menu-panel button { border: 0; background: transparent; color: #82e49e; padding: 10px 12px; font-size: 0.62rem; letter-spacing: 0.1em; cursor: pointer; }
 
 .readout { min-height: 210px; margin: 18px 0; padding: 16px; border: 1px solid #315b3d; background: rgba(6, 20, 11, 0.78); box-shadow: inset 0 0 28px rgba(50, 137, 74, 0.08); }
 .readout-meta { display: flex; justify-content: space-between; color: #60856a; font-size: 0.62rem; letter-spacing: 0.08em; }
@@ -66,14 +66,14 @@ button { font: inherit; }
 .current-message p { margin: 0 0 8px; color: #82e49e; font-size: 0.72rem; letter-spacing: 0.14em; }
 .current-message strong { display: block; font-size: clamp(0.95rem, 4vw, 1.13rem); line-height: 1.55; font-weight: 500; }
 .request-state { color: #8eb798; font-size: 0.66rem; letter-spacing: 0.08em; border-top: 1px dashed #315b3d; padding-top: 12px; }
-.readout-collapsed { display: flex; align-items: center; justify-content: space-between; margin: 12px 0; min-height: 44px; padding: 4px 4px 4px 12px; border: 1px solid #183923; color: #60856a; font-size: 0.62rem; letter-spacing: 0.1em; }
+.readout-collapsed { display: flex; align-items: center; margin: 12px 0; min-height: 44px; padding: 4px 12px; border: 1px solid #183923; color: #60856a; font-size: 0.62rem; letter-spacing: 0.1em; }
 
 .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .key { aspect-ratio: 1.45; min-height: 70px; border: 1px solid #3d7350; border-radius: 4px; color: #d6f7dc; background: linear-gradient(180deg, rgba(31, 65, 42, 0.7), rgba(7, 20, 11, 0.96)); box-shadow: inset 0 1px rgba(255,255,255,0.06), 0 4px 0 #010302; display: grid; place-content: center; gap: 3px; cursor: pointer; touch-action: manipulation; }
 .key span { font-size: clamp(1.5rem, 7vw, 2.15rem); }
 .key small { color: #82e49e; font-size: 0.52rem; letter-spacing: 0.12em; }
 .key:active { transform: translateY(3px); box-shadow: inset 0 1px rgba(255,255,255,0.06), 0 1px 0 #010302; }
-.key:focus-visible, .menu-trigger:focus-visible, .menu-panel button:focus-visible, .readout-collapsed button:focus-visible, .terminal-actions button:focus-visible, .restore-control:focus-visible { outline: 3px solid #e1ff8c; outline-offset: 2px; }
+.key:focus-visible, .menu-trigger:focus-visible, .menu-panel button:focus-visible, .terminal-actions button:focus-visible, .restore-control:focus-visible { outline: 3px solid #e1ff8c; outline-offset: 2px; }
 
 .terminal-actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 18px; }
 .terminal-actions button { border: 0; background: transparent; color: #82e49e; padding: 10px 2px; font-size: 0.62rem; letter-spacing: 0.08em; cursor: pointer; }
