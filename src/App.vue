@@ -8,6 +8,7 @@ const {
   startAudio,
   state,
   ready,
+  storageError,
   initialize,
   displayMode,
   pendingEvent,
@@ -54,6 +55,11 @@ window.setTimeout(() => {
       <small>Prototype wordmark — official logo asset pending</small>
     </section>
 
+    <section v-else-if="!ready && storageError" class="readout" role="alert">
+      <p>{{ storageError }}</p>
+      <button @click="initialize">RETRY CONNECTION</button>
+    </section>
+
     <section v-else-if="ready" class="terminal" aria-label="Horrox Mining terminal">
       <header class="terminal-header">
         <div class="header-brand" aria-label="1st Horrox Mining Limited">
@@ -82,6 +88,8 @@ window.setTimeout(() => {
         </div>
       </header>
 
+      <p v-if="storageError" role="alert">{{ storageError }}</p>
+
       <section v-if="textDisplayVisible" class="readout" aria-live="polite">
         <div class="readout-meta">
           <span>FACILITY AGE {{ facilityAgeHours }}H</span>
@@ -109,7 +117,7 @@ window.setTimeout(() => {
           @click="pressKey(key)"
         >
           <span>{{ key }}</span>
-          <small v-if="key === '0'">REPEAT</small>
+          <small v-if="key === '0'">REPEAT / STATUS</small>
           <small v-else-if="key === '*'">BACK</small>
           <small v-else-if="key === '#'">ENTER</small>
         </button>
@@ -127,6 +135,17 @@ window.setTimeout(() => {
           <li v-for="entry in latestTranscript" :key="entry.id">
             <span>{{ entry.speaker }}</span>
             <p>{{ entry.text }}</p>
+          </li>
+        </ol>
+      </details>
+
+      <details class="transcript">
+        <summary>OPERATIONAL HISTORY // {{ state.operations.length }} EVENTS</summary>
+        <ol>
+          <li v-for="entry in [...state.operations].reverse()" :key="entry.id">
+            <span>{{ new Date(entry.timestamp).toLocaleString() }} // {{ entry.source }} // {{ entry.resolution }}</span>
+            <p>{{ entry.summary }}</p>
+            <p v-if="entry.reason">Reason: {{ entry.reason }}</p>
           </li>
         </ol>
       </details>

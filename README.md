@@ -7,6 +7,7 @@ The player is the captain of a small orbital mining facility. Sound is the prima
 ## Project authority
 
 - [Crew Brief v0.1](https://docs.google.com/document/d/17gsrWFUz87kP_HKOsciiEYQc0mBk24D_Pd-vLmqCP6U)
+- [Milestone 2 Crew Brief — The Living Mine](https://docs.google.com/document/d/1z4XdfSmxUQitOvMrb87Cztb1MBMKvapDhYRaKurQIhI/edit)
 - Product owner and final decision-maker: Dan
 
 The Google Drive brief is the canonical source for product scope, acceptance criteria, and deferred work.
@@ -52,6 +53,12 @@ Prototype miner names and dialogue are placeholders pending content-owner approv
 The accepted MVP and correctness pass are under review in [PR #1](https://github.com/steelwater/horrox-mining/pull/1). Work on `fix/terminal-correctness` fixes tutorial autopilot activation, tutorial repeat, repeat during pending requests, resumed tutorial prompts, startup ambience, and Android speech interruption. Commands are ignored until the saved facility has loaded, preventing keyboard input during boot from overwriting progress. Android discovers installed offline voices and caches a suitable distinct voice per profile as profiles are first used, reusing voices when the installed selection is limited.
 
 Verification: 21 tests pass, including facility-level autopilot/repeat/resume regressions, boot-input protection, speech-error recovery, stopping queued speech, and delayed speech-callback handling. Production web/type build and Android debug build pass. Emulator logs confirm ambience before keypad input, native docking request repetition, different installed voices for terminal and miner, and native stop followed immediately by safety speech during a reconnect announcement. Hardware Bluetooth input/audio, screen-off behavior, multiple device voice inventories, and iOS runtime verification remain pending. These changes do not expand persisted simulation entities or add accessibility settings.
+
+## Milestone 2 — The Living Mine
+
+The mine now stores vessels, miners, assignments, cargo, processing, routine drone service, facility systems, and structured operational history. One deterministic event clock drives foreground and offline work, with safe five-minute autonomy and concise return briefings. Key 0 retains tutorial/request repeat and otherwise provides live operational status. The established Facility AI voice configuration is unchanged.
+
+See [implementation, migration, verification, and limitations](docs/milestone-2.md). Device listening and native lifecycle checks remain pending before acceptance.
 
 ## Development
 

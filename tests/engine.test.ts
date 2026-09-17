@@ -70,11 +70,11 @@ describe('persistent facility continuity', () => {
   it('advances production without punishing a returning player', () => {
     const saved = createInitialState(1_000)
     saved.lastSavedAt = 1_000
-    const restored = restoreState(saved, 31 * 60_000)
+    const restored = restoreState(saved, 38 * 60_000)
     expect(restored.completedCycles).toBe(2)
     expect(restored.state.productionCycles).toBe(2)
     expect(restored.state.oreProcessed).toBe(24)
-    expect(restored.state.history.at(-1)).toContain('automated control')
+    expect(restored.state.operations.at(-1)?.summary).toContain('Processor One')
   })
 })
 

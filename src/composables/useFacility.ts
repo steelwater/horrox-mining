@@ -2,12 +2,15 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { AudioDirector } from '../audio/audioDirector'
 import { chatter, miners } from '../game/content'
 import {
-  canStartEvent,
+  advanceFacility,
+  applyPendingDecision,
+  beginRequest,
+  operationalStatus,
+  returnBriefing,
   createInitialState,
   findEvent,
   nextAutopilotState,
   normalizeKeyboardKey,
-  resolvePendingEvent,
   restoreState,
   routeKey,
 } from '../game/engine'
@@ -20,9 +23,10 @@ const audio = new AudioDirector()
 export function useFacility() {
   const state = reactive<FacilityState>(createInitialState(Date.now()))
   const ready = ref(false)
+  const storageError = ref('')
+  let suspendedAt: number | null = null
   const displayMode = ref<'standard' | 'dim' | 'black'>('standard')
   const lastMessage = ref('')
-  const lastProfile = ref('terminal')
   const timers: number[] = []
 
   const pendingEvent = computed(() => state.pendingEvent ? findEvent(state.pendingEvent.eventId) : null)
@@ -44,28 +48,32 @@ export function useFacility() {
     }
     state.transcript = [...state.transcript, entry].slice(-80)
     lastMessage.value = text
-    lastProfile.value = profileId
     audio.speak(text, profileId, priority)
   }
 
   async function persist(): Promise<void> {
+    if (!ready.value) return
     state.lastSavedAt = Date.now()
-    await saveFacility({ ...state })
+    try {
+      await saveFacility({ ...state })
+      storageError.value = ''
+    } catch {
+      storageError.value = 'Saving is unavailable. Keep this session open and retry when storage is available.'
+    }
   }
 
   async function initialize(): Promise<void> {
     if (ready.value) return
+    let saved: FacilityState | null
+    try { saved = await loadFacility() } catch (error) {
+      storageError.value = error instanceof Error ? error.message : 'Saved operation unavailable. Please retry.'
+      return
+    }
     const now = Date.now()
-    const saved = await loadFacility()
     if (saved) {
       const restored = restoreState(saved, now)
       Object.assign(state, restored.state)
-      announce(
-        `Captain terminal connected. Welcome back. Elapsed station time is ${Math.max(1, Math.round(restored.elapsedMs / 60_000))} minutes. Operations continued under automated control. ${restored.completedCycles} extraction cycles completed.`,
-        'Facility Control',
-        'terminal',
-        2,
-      )
+      announce(returnBriefing(state, saved.lastActiveAt, now), 'Facility Control', 'terminal', 2)
     } else {
       state.onboardingStatus = 'active'
       announce(onboardingSteps[0]!.prompt, 'Onboarding Assistant', 'onboarding', 2)
@@ -73,13 +81,23 @@ export function useFacility() {
     if (state.onboardingStatus === 'active' && saved) {
       announce(onboardingSteps[state.onboardingStep]!.prompt, 'Onboarding Assistant', 'onboarding', 2)
     }
+    state.lastActiveAt = now
     ready.value = true
+    await persist()
     scheduleTimers()
   }
 
   async function pressKey(key: KeypadKey): Promise<void> {
     if (!ready.value) return
-    await audio.startAmbience()
+    const requestAtInput = state.pendingEvent
+    tick()
+    // An expired response must not become an unrelated top-level command.
+    if (requestAtInput && !state.pendingEvent && key !== '0') {
+      await persist()
+      return
+    }
+    // Audio permission/resume must not block operational commands or saving.
+    void audio.startAmbience().catch(console.warn)
     audio.playKeyTone(key)
 
     if (state.onboardingStatus === 'active') {
@@ -102,9 +120,9 @@ export function useFacility() {
         announce(event.spokenLines.join(' '), speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority)
         return
       }
-      const resolution = resolvePendingEvent(state.pendingEvent, key, Date.now())
-      if (resolution.resolved) {
-        finishEvent(resolution.message, resolution.autonomous)
+      const message = applyPendingDecision(state, key, Date.now())
+      if (message) {
+        announce(message, 'Facility Control', 'terminal', 2)
       } else {
         announce('That response is not available for the current request. Press 1 or 2, or allow the crew to decide.', 'Facility Control')
       }
@@ -114,8 +132,7 @@ export function useFacility() {
 
     const command = routeKey(key)
     if (command.type === 'repeat') {
-      if (lastMessage.value) announce(lastMessage.value, 'Repeat', lastProfile.value)
-      else announce('No previous message is available.', 'Facility Control')
+      announce(operationalStatus(state), 'Facility Control')
     } else if (command.type === 'back') {
       announce('Main terminal.', 'Facility Control')
     } else if (command.type === 'confirm') {
@@ -124,7 +141,7 @@ export function useFacility() {
       state.autopilotEnabled = nextAutopilotState(state.autopilotEnabled)
       announce(`Autopilot ${state.autopilotEnabled ? 'enabled' : 'disabled'}. ${state.autopilotEnabled ? 'Normal operations will continue. You may listen or interrupt at any time.' : 'Captain input restored.'}`, 'Facility Control', 'terminal', 2)
     } else if (command.type === 'status') {
-      announce(command.message, 'Facility Control')
+      announce(operationalStatus(state), 'Facility Control')
     } else {
       startEvent(command.eventId)
     }
@@ -133,59 +150,58 @@ export function useFacility() {
 
   function startEvent(eventId: string): void {
     const event = findEvent(eventId)
-    if (!event || !canStartEvent(state, event, Date.now())) {
+    if (!event || !beginRequest(state, eventId, Date.now())) {
       announce('That channel has no new report at this time.', 'Facility Control')
       return
     }
-    state.eventCooldowns[event.id] = Date.now() + event.cooldownMs
-    state.pendingEvent = { eventId, requestedAt: Date.now() }
     announce(event.spokenLines.join(' '), speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority)
-    if (event.immediateSafety) {
-      const resolution = resolvePendingEvent(state.pendingEvent, null, Date.now())
-      finishEvent(resolution.message, true)
+    if (event.immediateSafety) announce(state.operations.at(-1)!.summary, 'Facility Control', 'terminal', 1)
+  }
+
+  function tick(): void {
+    if (!ready.value || suspendedAt !== null) return
+    const before = state.nextOperationId
+    advanceFacility(state, Date.now())
+    state.lastActiveAt = Math.max(state.lastActiveAt, Date.now())
+    if (state.nextOperationId !== before) {
+      const latest = state.operations.at(-1)!
+      if (state.onboardingStatus !== 'active') announce(latest.summary, 'Facility Control', 'terminal', 2)
+      void persist()
     }
   }
 
-  function finishEvent(message: string, autonomous: boolean): void {
-    const id = state.pendingEvent?.eventId
-    state.pendingEvent = null
-    if (id) state.history = [...state.history, `${id}: ${message}`].slice(-100)
-    announce(message, autonomous ? 'Facility Control' : 'Terminal', 'terminal', autonomous ? 2 : 3)
-  }
-
-  function checkTimeout(): void {
-    if (!state.pendingEvent) return
-    const resolution = resolvePendingEvent(state.pendingEvent, null, Date.now())
-    if (resolution.resolved) {
-      finishEvent(resolution.message, true)
+  function onVisibilityChange(): void {
+    if (!ready.value) return
+    if (document.hidden) {
+      tick()
+      suspendedAt = Date.now()
+      state.lastActiveAt = suspendedAt
+      void persist()
+    } else if (suspendedAt !== null) {
+      const since = suspendedAt
+      suspendedAt = null
+      advanceFacility(state, Date.now())
+      announce(returnBriefing(state, since, Date.now()), 'Facility Control', 'terminal', 2)
+      state.lastActiveAt = Date.now()
       void persist()
     }
   }
 
   function emitChatter(): void {
-    if (!ready.value || state.onboardingStatus === 'active' || state.pendingEvent) return
+    if (!ready.value || suspendedAt !== null || state.onboardingStatus === 'active' || state.pendingEvent) return
     const line = chatter[Math.floor(Math.random() * chatter.length)]!
     announce(line.text, line.speaker, line.profile, 5)
   }
 
-  function autopilotTick(): void {
-    if (!state.autopilotEnabled || state.pendingEvent || state.onboardingStatus === 'active') return
-    state.productionCycles += 1
-    state.oreProcessed += 12
-    announce(`Autopilot report. Extraction cycle ${state.productionCycles} complete. Twelve tonnes transferred to processing.`, 'Facility Control', 'terminal', 4)
-    void persist()
-  }
-
   function scheduleTimers(): void {
-    timers.push(window.setInterval(checkTimeout, 1_000))
+    timers.push(window.setInterval(tick, 1_000))
     timers.push(window.setInterval(emitChatter, 24_000))
-    timers.push(window.setInterval(autopilotTick, 45_000))
-    timers.push(window.setInterval(() => void persist(), 30_000))
+    timers.push(window.setInterval(() => { if (suspendedAt === null) { tick(); void persist() } }, 30_000))
   }
 
   function skipOnboarding(): void {
     state.onboardingStatus = 'skipped'
-    announce('Onboarding skipped. Main terminal active. Press 0 to repeat the current message, or 9 for autopilot.', 'Onboarding Assistant', 'onboarding', 2)
+    announce('Onboarding skipped. Main terminal active. Press 0 for current status, or 9 for autopilot.', 'Onboarding Assistant', 'onboarding', 2)
     void persist()
   }
 
@@ -221,10 +237,12 @@ export function useFacility() {
 
   onMounted(() => {
     window.addEventListener('keydown', onKeydown)
+    document.addEventListener('visibilitychange', onVisibilityChange)
   })
 
   onBeforeUnmount(() => {
     window.removeEventListener('keydown', onKeydown)
+    document.removeEventListener('visibilitychange', onVisibilityChange)
     timers.forEach((timer) => window.clearInterval(timer))
     audio.stop()
     void persist()
@@ -234,6 +252,7 @@ export function useFacility() {
     startAudio: () => audio.startAmbience().catch(console.warn),
     state,
     ready,
+    storageError,
     initialize,
     displayMode,
     pendingEvent,
