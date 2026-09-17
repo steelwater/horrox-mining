@@ -5,6 +5,7 @@ type SpeakOptions = {
   locale: string
   rate: number
   pitch: number
+  profileId: string
 }
 
 type HorroxSpeechPlugin = {

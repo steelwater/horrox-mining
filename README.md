@@ -47,6 +47,12 @@ Capacitor + Vue 3 is the approved mobile stack. The first prototype slice includ
 
 Prototype miner names and dialogue are placeholders pending content-owner approval. The official logo asset is also still required.
 
+## Correctness pass (17 September 2026)
+
+The accepted MVP is under review in [PR #1](https://github.com/steelwater/horrox-mining/pull/1). Follow-up branch `fix/terminal-correctness` starts from that PR and fixes tutorial autopilot activation, tutorial repeat, repeat during pending requests, resumed tutorial prompts, startup ambience, and Android speech interruption. Android now discovers installed offline voices and caches a suitable distinct voice per profile as profiles are first used, reusing voices when the installed selection is limited.
+
+Verification: 17 tests pass, including facility-level autopilot/repeat regressions and delayed speech-callback handling; production web/type build and Android debug build pass. Emulator logs confirm ambience before keypad input, native docking request repetition, and different installed voices for terminal and miner. Hardware Bluetooth input/audio, screen-off behavior, multiple device voice inventories, and iOS runtime verification remain pending. Speech interruption has automated queue regression coverage; device interruption testing remains pending. These changes do not expand persisted simulation entities or add accessibility settings.
+
 ## Development
 
 ```sh

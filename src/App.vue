@@ -5,6 +5,7 @@ import type { KeypadKey } from './game/types'
 
 const booting = ref(true)
 const {
+  startAudio,
   state,
   ready,
   initialize,
@@ -23,6 +24,8 @@ const keys: KeypadKey[] = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0'
 const latestTranscript = computed(() => [...state.transcript].reverse())
 const menuOpen = ref(false)
 const textDisplayVisible = ref(true)
+
+void startAudio()
 
 function toggleTextDisplay(): void {
   textDisplayVisible.value = !textDisplayVisible.value

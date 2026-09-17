@@ -70,6 +70,9 @@ export function useFacility() {
       state.onboardingStatus = 'active'
       announce(onboardingSteps[0]!.prompt, 'Onboarding Assistant', 'onboarding', 2)
     }
+    if (state.onboardingStatus === 'active' && saved) {
+      announce(onboardingSteps[state.onboardingStep]!.prompt, 'Onboarding Assistant', 'onboarding', 2)
+    }
     ready.value = true
     scheduleTimers()
   }
@@ -80,6 +83,11 @@ export function useFacility() {
 
     if (state.onboardingStatus === 'active') {
       const result = advanceOnboarding(state.onboardingStatus, state.onboardingStep, key)
+      if (key === '0') {
+        if (lastMessage.value) announce(lastMessage.value, 'Onboarding Assistant', 'onboarding', 2)
+        if (!result.accepted) return
+      }
+      if (result.accepted && key === '9') state.autopilotEnabled = true
       state.onboardingStatus = result.status
       state.onboardingStep = result.step
       announce(result.message, 'Onboarding Assistant', 'onboarding', 2)
@@ -88,6 +96,11 @@ export function useFacility() {
     }
 
     if (state.pendingEvent) {
+      if (key === '0') {
+        const event = findEvent(state.pendingEvent.eventId)!
+        announce(event.spokenLines.join(' '), speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority)
+        return
+      }
       const resolution = resolvePendingEvent(state.pendingEvent, key, Date.now())
       if (resolution.resolved) {
         finishEvent(resolution.message, resolution.autonomous)
@@ -217,6 +230,7 @@ export function useFacility() {
   })
 
   return {
+    startAudio: () => audio.startAmbience().catch(console.warn),
     state,
     ready,
     initialize,

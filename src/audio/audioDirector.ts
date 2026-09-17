@@ -14,6 +14,8 @@ export class AudioDirector {
   private queue: SpeechRequest[] = []
   private speaking = false
   private currentPriority: AudioPriority | null = null
+  private playbackId = 0
+  private stopping = false
 
   async startAmbience(): Promise<void> {
     if (this.context) {
@@ -34,7 +36,7 @@ export class AudioDirector {
     overtone.frequency.value = 108
     filter.type = 'lowpass'
     filter.frequency.value = 240
-    gain.gain.value = 0.025
+    gain.gain.value = this.speaking ? 0.008 : 0.025
 
     hum.connect(filter)
     overtone.connect(filter)
@@ -45,6 +47,7 @@ export class AudioDirector {
 
     this.context = context
     this.ambienceGain = gain
+    await context.resume()
   }
 
   playKeyTone(key: string): void {
@@ -69,9 +72,16 @@ export class AudioDirector {
 
     if (this.speaking && this.currentPriority !== null && priority < this.currentPriority) {
       this.queue.unshift({ text, profileId, priority })
-      if (!nativeSpeech && typeof speechSynthesis !== 'undefined') {
+      this.playbackId += 1
+      this.speaking = false
+      if (nativeSpeech) {
+        this.stopping = true
+        void stopNativeSpeech().catch(console.warn).finally(() => {
+          this.stopping = false
+          this.playNext()
+        })
+      } else if (typeof speechSynthesis !== 'undefined') {
         speechSynthesis.cancel()
-        this.speaking = false
       }
     } else {
       this.queue.push({ text, profileId, priority })
@@ -82,15 +92,16 @@ export class AudioDirector {
 
   stop(): void {
     this.queue = []
+    this.playbackId += 1
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
-    void stopNativeSpeech()
+    void stopNativeSpeech().catch(console.warn)
     this.speaking = false
     this.currentPriority = null
     this.setAmbienceLevel(0.025)
   }
 
   private playNext(): void {
-    if (this.speaking) return
+    if (this.speaking || this.stopping) return
     const request = this.queue.shift()
     if (!request) return
 
@@ -98,6 +109,7 @@ export class AudioDirector {
     this.speaking = true
     this.currentPriority = request.priority
     this.setAmbienceLevel(0.008)
+    const playbackId = ++this.playbackId
 
     if (canUseNativeSpeech()) {
       void speakNatively({
@@ -105,15 +117,16 @@ export class AudioDirector {
         locale: profile.fallbackOrder[0] ?? profile.locale,
         rate: profile.rate,
         pitch: profile.pitch,
+        profileId: profile.id,
       }).then(
-        () => this.finishSpeech(),
-        () => this.finishSpeech(),
+        () => this.finishSpeech(playbackId),
+        (error) => { console.warn('Speech playback failed', error); this.finishSpeech(playbackId) },
       )
       return
     }
 
     if (typeof speechSynthesis === 'undefined') {
-      this.finishSpeech()
+      this.finishSpeech(playbackId)
       return
     }
 
@@ -122,13 +135,14 @@ export class AudioDirector {
     utterance.pitch = profile.pitch
     utterance.lang = profile.locale
     utterance.voice = this.selectVoice(profile)
-    utterance.onend = () => this.finishSpeech()
-    utterance.onerror = () => this.finishSpeech()
+    utterance.onend = () => this.finishSpeech(playbackId)
+    utterance.onerror = () => this.finishSpeech(playbackId)
 
     speechSynthesis.speak(utterance)
   }
 
-  private finishSpeech(): void {
+  private finishSpeech(playbackId: number): void {
+    if (playbackId !== this.playbackId) return
     this.speaking = false
     this.currentPriority = null
     this.setAmbienceLevel(0.025)
