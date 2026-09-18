@@ -228,7 +228,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
   if (!Number.isFinite(now) || now < state.lastProcessedAt) return
   const end = state.lastProcessedAt + safeElapsed(state.lastProcessedAt, now)
   if (!state.commissioned) {
-    state.facilityAgeMs += end - state.lastProcessedAt
+    state.facilityAgeMs += now - state.lastProcessedAt
     state.lastProcessedAt = now
     return
   }
@@ -350,7 +350,8 @@ export function advanceFacility(state: FacilityState, now: number): void {
     for (const q of state.processingQueue) q.completesAt += skipped
     for (const field of ['berthInspectionAt', 'coolantInspectionAt', 'scannerCalibrationAt'] as const) if (state.systems[field] !== null) state.systems[field] += skipped
   }
-  state.facilityAgeMs += end - state.lastProcessedAt
+  // Calendar age includes the skipped interval; only operational work is bounded.
+  state.facilityAgeMs += now - state.lastProcessedAt
   state.lastProcessedAt = now
 }
 

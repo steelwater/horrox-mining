@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { advanceFacility, applyPendingDecision, beginRequest, CAPTAIN_TIMEOUT_MS, commissionFacility, createInitialState as freshFacility, MAX_CATCHUP_MS, operationalStatus, restoreState, returnBriefing, safeElapsed } from '../src/game/engine'
+import { advanceFacility, applyPendingDecision, beginRequest, CAPTAIN_TIMEOUT_MS, commissionFacility, createInitialState as freshFacility, operationalStatus, restoreState, returnBriefing, safeElapsed } from '../src/game/engine'
 import { loadFacility, migrateFacility, saveFacility, SAVE_KEY } from '../src/game/persistence'
 import { voiceProfiles } from '../src/game/content'
 
@@ -88,7 +88,7 @@ describe('persistent mine operations', () => {
     const state = createInitialState(start)
     const now = start + 365 * 24 * 60 * minute
     advanceFacility(state, now)
-    expect(state.facilityAgeMs).toBe(MAX_CATCHUP_MS)
+    expect(state.facilityAgeMs).toBe(now - start)
     expect(state.equipmentWear).toBe(0)
     expect(state.productionCycles).toBeGreaterThan(0)
     expect(state.operations.length).toBeLessThanOrEqual(1000)

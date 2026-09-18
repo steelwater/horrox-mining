@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatOperationTime, operationDate, OPERATION_START } from '../src/game/calendar'
+import { formatOperationTime, operationAgeAt, operationDate, OPERATION_START } from '../src/game/calendar'
 import { advanceFacility, commissionFacility, createInitialState, MAX_CATCHUP_MS } from '../src/game/engine'
 import { migrateFacility } from '../src/game/persistence'
 
@@ -16,7 +16,7 @@ describe('Horrox operation calendar', () => {
     }
   })
 
-  it('advances at one second per simulated second and stays independent of device timezone', () => {
+  it('advances at one second per elapsed second and stays independent of device timezone', () => {
     const state = createInitialState(start)
     advanceFacility(state, start + day + 3_600_000)
     expect(operationDate(state.facilityAgeMs).toISOString()).toBe('2075-09-18T01:00:00.000Z')
@@ -69,10 +69,43 @@ describe('Horrox operation calendar', () => {
     const state = createInitialState(start)
     commissionFacility(state, start)
     advanceFacility(state, start + 365 * day)
-    expect(state.facilityAgeMs).toBe(MAX_CATCHUP_MS)
+    expect(state.facilityAgeMs).toBe(365 * day)
     expect(state.operations.every((e) => e.operationAgeMs >= 0 && e.operationAgeMs <= MAX_CATCHUP_MS)).toBe(true)
     const dates = state.operations.map((e) => formatOperationTime(e.operationAgeMs))
     const restored = migrateFacility(JSON.parse(JSON.stringify(state)), start + 365 * day)
     expect(restored.operations.map((e) => formatOperationTime(e.operationAgeMs))).toEqual(dates)
+  })
+})
+
+describe('calendar beyond the simulation limit', () => {
+  it('advances 30 days while producing only seven days of work and retaining log dates', () => {
+    const state = createInitialState(start)
+    const bounded = createInitialState(start)
+    commissionFacility(state, start)
+    commissionFacility(bounded, start)
+    advanceFacility(state, start + 30 * day)
+    advanceFacility(bounded, start + MAX_CATCHUP_MS)
+    expect(state.oreProcessed).toBe(bounded.oreProcessed)
+    expect(state.productionCycles).toBe(bounded.productionCycles)
+    expect(state.operations).toEqual(bounded.operations)
+    expect(operationDate(state.facilityAgeMs).toISOString()).toBe('2075-10-17T00:00:00.000Z')
+    expect(operationAgeAt(state, start + 30 * day)).toBe(30 * day)
+    const restored = migrateFacility(JSON.parse(JSON.stringify(state)), start + 30 * day)
+    expect(restored.facilityAgeMs).toBe(30 * day)
+    advanceFacility(restored, start + 30 * day)
+    expect(restored.productionCycles).toBe(state.productionCycles)
+    advanceFacility(restored, start + 31 * day)
+    expect(restored.facilityAgeMs).toBe(31 * day)
+    expect(restored.operations.at(-1)!.operationAgeMs).toBeGreaterThan(30 * day)
+  })
+
+  it('preserves a schema 3 age and transcript dates while adding the full absence', () => {
+    const state = migrateFacility({ version: 3, lastProcessedAt: start, facilityAgeMs: 2 * day,
+      transcript: [{ id: 't1', timestamp: start, operationAgeMs: day, speaker: 'Facility Control', text: 'Report.', priority: 2 }],
+    }, start + 30 * day)
+    advanceFacility(state, start + 30 * day)
+    expect(state.facilityAgeMs).toBe(32 * day)
+    expect(state.transcript[0]!.operationAgeMs).toBe(day)
+    expect(state.productionCycles).toBe(0)
   })
 })

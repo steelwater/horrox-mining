@@ -67,6 +67,7 @@ export type FacilityState = {
   nextOperationId: number
   createdAt: number
   lastSavedAt: number
+  /** Chronological elapsed time, independent of the simulation catch-up limit. */
   facilityAgeMs: number
   productionCycles: number
   oreProcessed: number
