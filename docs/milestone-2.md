@@ -57,3 +57,9 @@ Rollback: this work is isolated on a feature branch; `main` remains unchanged. V
 ## Developer review correction — 18 September 2026
 
 Following Dan’s PR #2 review, facility age now tracks full chronological elapsed time while simulation work remains capped at seven days. A 30-day absence advances the calendar 30 days and produces seven days of work. Existing schema-3 ages and saved transcript/history dates are retained without a schema change; previously discarded elapsed time cannot be reconstructed reliably and is not invented. Catch-up events retain the dates on which the bounded work was simulated, while reports after return use the full chronological age. Regression coverage includes long absences, commissioning, preserved historical dates, reload without replay, and subsequent work dates.
+
+## Tablet layout correction — 18 September 2026
+
+Dan’s physical-tablet screenshots exposed horizontal overflow and text overlap. Reproduced at an 800px viewport: the keypad grew to 838px and squeezed the readout to 165px. Removed key aspect-ratio sizing and percentage readout minimum height, made grid tracks shrinkable, and gave wide-screen columns independent heights. Below 1000px the terminal stacks; wider screens have a bounded 360px keypad. Hidden-text mode centers the keypad. Long content wraps and remains in normal document flow; pinch zoom remains enabled.
+
+Verified long readiness text, portrait reload, hidden text, and phone/tablet layouts at 320, 390, 700, 800, 999, 1000, and 1280px widths with no horizontal document overflow. Visually inspected 800×1280, 1280×800, and 390×844. All 58 tests, type checks, production build, and Capacitor sync passed. Physical-tablet confirmation of this correction remains Dan’s next check. No simulation, save, or voice changes.
