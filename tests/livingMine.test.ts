@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { advanceFacility, applyPendingDecision, beginRequest, CAPTAIN_TIMEOUT_MS, createInitialState, MAX_CATCHUP_MS, operationalStatus, restoreState, returnBriefing, safeElapsed } from '../src/game/engine'
+import { advanceFacility, applyPendingDecision, beginRequest, CAPTAIN_TIMEOUT_MS, commissionFacility, createInitialState as freshFacility, MAX_CATCHUP_MS, operationalStatus, restoreState, returnBriefing, safeElapsed } from '../src/game/engine'
 import { loadFacility, migrateFacility, saveFacility, SAVE_KEY } from '../src/game/persistence'
 import { voiceProfiles } from '../src/game/content'
 
@@ -8,6 +8,13 @@ vi.mock('@capacitor/preferences', () => ({ Preferences: {
   get: vi.fn(async () => ({ value: storage.value })),
   set: vi.fn(async ({ value }: { value: string }) => { storage.value = value }),
 } }))
+
+function createInitialState(now: number) {
+  const state = freshFacility(now)
+  commissionFacility(state, now)
+  return state
+}
+
 const start = 1_800_000_000_000
 const minute = 60_000
 
@@ -175,10 +182,10 @@ describe('decisions and operational record', () => {
 describe('save integrity and established voice', () => {
   it('migrates the original counters, pending request, onboarding and history without retroactive production', () => {
     const state = migrateFacility({ version: 1, createdAt: start, lastSavedAt: start, oreProcessed: 144, history: ['existing history'], onboardingStatus: 'active', onboardingStep: 4, pendingEvent: { eventId: 'docking-hauler-two', requestedAt: start } }, start)
-    expect(state.version).toBe(2)
+    expect(state.version).toBe(3)
     expect(state.oreProcessed).toBe(144)
     expect(state.history).toEqual(['existing history'])
-    expect(state.onboardingStep).toBe(4)
+    expect(state.onboardingStep).toBe(0)
     expect(state.pendingEvent?.requestedAt).toBe(start)
     expect(state.vessels).toHaveLength(2)
   })
@@ -188,7 +195,7 @@ describe('save integrity and established voice', () => {
     expect(state.lastProcessedAt).toBe(start)
     expect(state.productionCycles).toBe(0)
     expect(state.pendingEvent).toBeNull()
-    expect(state.onboardingStep).toBe(6)
+    expect(state.onboardingStep).toBe(0)
     expect(safeElapsed(NaN, start)).toBe(0)
     expect(safeElapsed(start + minute, start)).toBe(0)
     const snapshot = JSON.stringify(state)

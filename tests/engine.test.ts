@@ -3,6 +3,7 @@ import {
   CAPTAIN_TIMEOUT_MS,
   canStartEvent,
   createInitialState,
+  commissionFacility,
   findEvent,
   normalizeKeyboardKey,
   nextAutopilotState,
@@ -69,6 +70,7 @@ describe('autonomous event resolution', () => {
 describe('persistent facility continuity', () => {
   it('advances production without punishing a returning player', () => {
     const saved = createInitialState(1_000)
+    commissionFacility(saved, 1_000)
     saved.lastSavedAt = 1_000
     const restored = restoreState(saved, 38 * 60_000)
     expect(restored.completedCycles).toBe(2)

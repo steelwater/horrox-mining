@@ -38,8 +38,8 @@ Capacitor + Vue 3 is the approved mobile stack. The first prototype slice includ
 - boot sequence with clearly labeled placeholder branding
 - touchscreen and physical-keyboard/numpad command routing
 - data-driven terminal commands, miners, voice profiles, and events
-- system text-to-speech with a distinct onboarding voice, voice profiles, priority queueing, and ambience ducking
-- resumable/skippable onboarding using the real keypad
+- system text-to-speech with established Facility Control and crew voice profiles, priority queueing, and ambience ducking
+- resumable commissioning checks using the real keypad, with safe delegation
 - mining, docking, maintenance, non-critical problem, and immediate-safety flows
 - five-minute autonomous resolution
 - autopilot activity, passive chatter, local persistence, and reconnect summaries
@@ -54,11 +54,23 @@ The accepted MVP and correctness pass are under review in [PR #1](https://github
 
 Verification: 21 tests pass, including facility-level autopilot/repeat/resume regressions, boot-input protection, speech-error recovery, stopping queued speech, and delayed speech-callback handling. Production web/type build and Android debug build pass. Emulator logs confirm ambience before keypad input, native docking request repetition, different installed voices for terminal and miner, and native stop followed immediately by safety speech during a reconnect announcement. Hardware Bluetooth input/audio, screen-off behavior, multiple device voice inventories, and iOS runtime verification remain pending. These changes do not expand persisted simulation entities or add accessibility settings.
 
+## Canonical operation and lore
+
+The operation starts on **17 September 2075**. First run is the actual **Launch Day / Commissioning Sequence** for 1st Horrox Mining Ltd. Facility Control confirms its identity and the date, then guides mining-system, vessel, docking, power, processing, communications, repair-drone/support, crew, and autopilot checks before final readiness confirmation. Checks can be delegated safely; later readiness reviews do not restart the operation.
+
+Horrox orbital infrastructure predates this operation: the station exists from 2056, and Viajero and the first long-distance human crew reach the system in 2073. This staffed mining operation begins in 2075, before M2 destabilization on 23 August 2076. This project-side context was approved in [Dan's PR #2 playtest review](https://github.com/steelwater/horrox-mining/pull/2); Dan will synchronize the separate `terminal-lore` repository later.
+
+The canonical launch date never changes with installation date, reinstall, cache clearing, save reset, locale, or timezone. A genuinely new save starts at 2075-09-17 00:00 station time. Existing saves preserve elapsed facility age and progress. The displayed calendar is launch date plus deterministic facility age: one second per processed second, with the existing seven-day catch-up limit. Both transcript and operational history use this station calendar; device timestamps remain internal for elapsed-time calculations.
+
+Current prototype identities are Excavator Three (`excavator-03`), Hauler Two (`hauler-02`), Berth Four, Processor One, repair drone DR-01, coolant pump two, and the ore scanner. The crew remains Mara Vale / Latch (docking), Iko Ren / Patch (maintenance), and Sol Arden / Deepwell (extraction). Crew names and banter remain prototype content pending approval; no new cast or final Facility AI name is introduced here. The existing **Mining Facility AI voice configuration remains unchanged**.
+
 ## Milestone 2 — The Living Mine
 
-The mine now stores vessels, miners, assignments, cargo, processing, routine drone service, facility systems, and structured operational history. One deterministic event clock drives foreground and offline work, with safe five-minute autonomy and concise return briefings. Key 0 retains tutorial/request repeat and otherwise provides live operational status. The established Facility AI voice configuration is unchanged.
+The mine persists vessels, miners, assignments, cargo, processing, routine drone service, facility systems, and structured operational history. One deterministic event clock drives foreground and offline work, with safe five-minute autonomy and concise return briefings. Key 0 repeats commissioning/open requests and otherwise reports live operational status. Conversational banter is an ordered short exchange; replies start 600 milliseconds after the previous line finishes. Priority reports can interrupt and discard an unfinished exchange.
 
-See [implementation, migration, verification, and limitations](docs/milestone-2.md). Device listening and native lifecycle checks remain pending before acceptance.
+**Screen-off simulation is supported through deterministic catch-up. Continuous live audio while the phone is locked is deferred.** Hiding the app suspends foreground ticking and chatter scheduling, saves the operation, and catches up on resume. This PR adds no native background-audio service or promise of locked-screen speech. Dedicated native lifecycle/audio work and hardware verification belong to a later milestone.
+
+See [implementation, migration, verification, and limitations](docs/milestone-2.md). Native listening and device lifecycle checks remain pending before acceptance.
 
 ## Development
 

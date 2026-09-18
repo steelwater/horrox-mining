@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { formatOperationTime, operationDate } from './game/calendar'
 import { useFacility } from './composables/useFacility'
 import type { KeypadKey } from './game/types'
 
@@ -92,7 +93,7 @@ window.setTimeout(() => {
 
       <section v-if="textDisplayVisible" class="readout" aria-live="polite">
         <div class="readout-meta">
-          <span>FACILITY AGE {{ facilityAgeHours }}H</span>
+          <span>{{ formatOperationTime(state.facilityAgeMs) }} // {{ facilityAgeHours }}H</span>
           <span>{{ state.autopilotEnabled ? 'AUTOPILOT' : 'CAPTAIN CONTROL' }}</span>
         </div>
         <article v-if="latestTranscript[0]" class="current-message">
@@ -125,14 +126,15 @@ window.setTimeout(() => {
 
       <section class="terminal-actions" aria-label="Terminal options">
         <button @click.stop="cycleDisplayMode">DISPLAY: {{ displayMode.toUpperCase() }}</button>
-        <button v-if="onboardingActive" @click="skipOnboarding">SKIP ONBOARDING</button>
-        <button v-else @click="replayOnboarding">REPLAY ONBOARDING</button>
+        <button v-if="onboardingActive" @click="skipOnboarding">DELEGATE CHECKS</button>
+        <button v-else @click="replayOnboarding">REVIEW READINESS</button>
       </section>
 
       <details class="transcript">
         <summary>TRANSCRIPT // {{ state.transcript.length }} MESSAGES</summary>
         <ol>
           <li v-for="entry in latestTranscript" :key="entry.id">
+            <time :datetime="operationDate(entry.operationAgeMs).toISOString()">{{ formatOperationTime(entry.operationAgeMs) }}</time>
             <span>{{ entry.speaker }}</span>
             <p>{{ entry.text }}</p>
           </li>
@@ -143,7 +145,8 @@ window.setTimeout(() => {
         <summary>OPERATIONAL HISTORY // {{ state.operations.length }} EVENTS</summary>
         <ol>
           <li v-for="entry in [...state.operations].reverse()" :key="entry.id">
-            <span>{{ new Date(entry.timestamp).toLocaleString() }} // {{ entry.source }} // {{ entry.resolution }}</span>
+            <time :datetime="operationDate(entry.operationAgeMs).toISOString()">{{ formatOperationTime(entry.operationAgeMs) }}</time>
+            <span>{{ entry.source }} // {{ entry.resolution }}</span>
             <p>{{ entry.summary }}</p>
             <p v-if="entry.reason">Reason: {{ entry.reason }}</p>
           </li>

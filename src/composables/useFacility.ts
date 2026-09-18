@@ -1,3 +1,4 @@
+import { operationAgeAt } from '../game/calendar'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { AudioDirector } from '../audio/audioDirector'
 import { chatter, miners } from '../game/content'
@@ -8,13 +9,14 @@ import {
   operationalStatus,
   returnBriefing,
   createInitialState,
+  commissionFacility,
   findEvent,
   nextAutopilotState,
   normalizeKeyboardKey,
   restoreState,
   routeKey,
 } from '../game/engine'
-import { advanceOnboarding, onboardingSteps } from '../game/onboarding'
+import { advanceOnboarding, onboardingPrompt } from '../game/onboarding'
 import { loadFacility, saveFacility } from '../game/persistence'
 import type { AudioPriority, FacilityState, KeypadKey, TranscriptEntry } from '../game/types'
 
@@ -33,10 +35,9 @@ export function useFacility() {
   const onboardingActive = computed(() => state.onboardingStatus === 'active')
   const facilityAgeHours = computed(() => Math.floor(state.facilityAgeMs / 3_600_000))
 
-  function announce(
+  function recordTranscript(
     text: string,
     speaker = 'Facility Control',
-    profileId = 'terminal',
     priority: AudioPriority = 3,
   ): void {
     const entry: TranscriptEntry = {
@@ -44,10 +45,15 @@ export function useFacility() {
       speaker,
       text,
       timestamp: Date.now(),
+      operationAgeMs: operationAgeAt(state, Date.now()),
       priority,
     }
     state.transcript = [...state.transcript, entry].slice(-80)
     lastMessage.value = text
+  }
+
+  function announce(text: string, speaker = 'Facility Control', profileId = 'terminal', priority: AudioPriority = 3): void {
+    recordTranscript(text, speaker, priority)
     audio.speak(text, profileId, priority)
   }
 
@@ -75,11 +81,13 @@ export function useFacility() {
       Object.assign(state, restored.state)
       announce(returnBriefing(state, saved.lastActiveAt, now), 'Facility Control', 'terminal', 2)
     } else {
+      Object.assign(state, createInitialState(now))
       state.onboardingStatus = 'active'
-      announce(onboardingSteps[0]!.prompt, 'Onboarding Assistant', 'onboarding', 2)
+      announce(onboardingPrompt(state), 'Facility Control', 'terminal', 2)
     }
+    if (state.onboardingStatus === 'pending') state.onboardingStatus = 'active'
     if (state.onboardingStatus === 'active' && saved) {
-      announce(onboardingSteps[state.onboardingStep]!.prompt, 'Onboarding Assistant', 'onboarding', 2)
+      announce(onboardingPrompt(state), 'Facility Control', 'terminal', 2)
     }
     state.lastActiveAt = now
     ready.value = true
@@ -89,6 +97,7 @@ export function useFacility() {
 
   async function pressKey(key: KeypadKey): Promise<void> {
     if (!ready.value) return
+    audio.cancelChatter()
     const requestAtInput = state.pendingEvent
     tick()
     // An expired response must not become an unrelated top-level command.
@@ -103,13 +112,18 @@ export function useFacility() {
     if (state.onboardingStatus === 'active') {
       const result = advanceOnboarding(state.onboardingStatus, state.onboardingStep, key)
       if (key === '0') {
-        if (lastMessage.value) announce(lastMessage.value, 'Onboarding Assistant', 'onboarding', 2)
+        if (lastMessage.value) announce(lastMessage.value, 'Facility Control', 'terminal', 2)
         if (!result.accepted) return
       }
       if (result.accepted && key === '9') state.autopilotEnabled = true
       state.onboardingStatus = result.status
       state.onboardingStep = result.step
-      announce(result.message, 'Onboarding Assistant', 'onboarding', 2)
+      if (result.status === 'complete') {
+        commissionFacility(state, Date.now())
+        announce('Readiness confirmed. Normal operations authorized. Facility Control will coordinate the mine. Silence is safe.', 'Facility Control', 'terminal', 2)
+      } else {
+        announce(`${result.accepted ? '' : 'For this readiness check, '}${onboardingPrompt(state)}`, 'Facility Control', 'terminal', 2)
+      }
       await persist()
       return
     }
@@ -174,6 +188,7 @@ export function useFacility() {
     if (!ready.value) return
     if (document.hidden) {
       tick()
+      audio.cancelChatter()
       suspendedAt = Date.now()
       state.lastActiveAt = suspendedAt
       void persist()
@@ -189,8 +204,11 @@ export function useFacility() {
 
   function emitChatter(): void {
     if (!ready.value || suspendedAt !== null || state.onboardingStatus === 'active' || state.pendingEvent) return
-    const line = chatter[Math.floor(Math.random() * chatter.length)]!
-    announce(line.text, line.speaker, line.profile, 5)
+    const exchange = chatter[Math.floor(Math.random() * chatter.length)]!
+    audio.speakExchange(exchange.lines, (line) => {
+      recordTranscript(line.text, line.speaker, 5)
+      void persist()
+    })
   }
 
   function scheduleTimers(): void {
@@ -200,15 +218,17 @@ export function useFacility() {
   }
 
   function skipOnboarding(): void {
+    commissionFacility(state, Date.now())
     state.onboardingStatus = 'skipped'
-    announce('Onboarding skipped. Main terminal active. Press 0 for current status, or 9 for autopilot.', 'Onboarding Assistant', 'onboarding', 2)
+    announce('Commissioning checks delegated to Facility Control. Normal operations authorized. Press 0 for current status, or 9 for autopilot.', 'Facility Control', 'terminal', 2)
     void persist()
   }
 
   function replayOnboarding(): void {
+    audio.cancelChatter()
     state.onboardingStatus = 'active'
     state.onboardingStep = 0
-    announce(onboardingSteps[0]!.prompt, 'Onboarding Assistant', 'onboarding', 2)
+    announce(onboardingPrompt(state), 'Facility Control', 'terminal', 2)
     void persist()
   }
 

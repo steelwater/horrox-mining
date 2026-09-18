@@ -1,4 +1,4 @@
-import type { EventDefinition, Miner, VoiceProfile } from './types'
+import type { ChatterExchange, EventDefinition, Miner, VoiceProfile } from './types'
 
 export const voiceProfiles: VoiceProfile[] = [
   {
@@ -166,10 +166,18 @@ export const events: EventDefinition[] = [
   },
 ]
 
-export const chatter = [
-  { speaker: 'Patch', profile: 'bright', text: 'Deepwell, your excavator is making that noise again.' },
-  { speaker: 'Deepwell', profile: 'measured', text: 'That noise is called productive confidence.' },
-  { speaker: 'Latch', profile: 'steady', text: 'Hauler Two is early. Mark the calendar. Quietly, so we do not frighten it.' },
-  { speaker: 'Patch', profile: 'bright', text: 'I found the missing torque driver. It was in the box labeled torque drivers.' },
-  { speaker: 'Deepwell', profile: 'measured', text: 'Horrox is clear beyond the gantry tonight. Worth a look, if anyone gets a minute.' },
+export const chatter: ChatterExchange[] = [
+  { id: 'productive-confidence', lines: [
+    { speaker: 'Patch', profile: 'bright', text: 'Deepwell, your excavator is making that noise again.' },
+    { speaker: 'Deepwell', profile: 'measured', text: 'That noise is called productive confidence.' },
+  ] },
+  { id: 'early-hauler', lines: [
+    { speaker: 'Latch', profile: 'steady', text: 'Hauler Two is early. Mark the calendar. Quietly, so we do not frighten it.' },
+  ] },
+  { id: 'torque-driver', lines: [
+    { speaker: 'Patch', profile: 'bright', text: 'I found the missing torque driver. It was in the box labeled torque drivers.' },
+  ] },
+  { id: 'clear-horrox', lines: [
+    { speaker: 'Deepwell', profile: 'measured', text: 'Horrox is clear beyond the gantry tonight. Worth a look, if anyone gets a minute.' },
+  ] },
 ]

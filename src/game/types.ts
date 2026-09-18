@@ -53,7 +53,9 @@ export type PendingEvent = {
 }
 
 export type FacilityState = {
-  version: 2
+  version: 3
+  operationStart: '2075-09-17'
+  commissioned: boolean
   lastProcessedAt: number
   lastActiveAt: number
   miners: Miner[]
@@ -83,6 +85,7 @@ export type TranscriptEntry = {
   speaker: string
   text: string
   timestamp: number
+  operationAgeMs: number
   priority: AudioPriority
 }
 
@@ -128,6 +131,7 @@ export type FacilitySystems = {
 export type OperationalEvent = {
   id: string
   timestamp: number
+  operationAgeMs: number
   source: string
   category: EventType | 'processing'
   summary: string
@@ -136,3 +140,6 @@ export type OperationalEvent = {
   resolution: 'pending' | 'manual' | 'autonomous'
   reason: string | null
 }
+
+export type ChatterLine = { speaker: string; profile: string; text: string }
+export type ChatterExchange = { id: string; lines: ChatterLine[] }

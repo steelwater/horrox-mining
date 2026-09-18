@@ -1,3 +1,4 @@
+import { OPERATION_START, operationAgeAt } from './calendar'
 import { events, miners } from './content'
 import type { EventDefinition, FacilityState, KeypadKey, PendingEvent, OperationalEvent } from './types'
 
@@ -67,12 +68,14 @@ export function resolvePendingEvent(
 
 export function createInitialState(now: number): FacilityState {
   return {
-    version: 2,
+    version: 3,
+    operationStart: OPERATION_START,
+    commissioned: false,
     lastProcessedAt: now,
     lastActiveAt: now,
     miners: JSON.parse(JSON.stringify(miners)),
     vessels: [
-      { id: 'excavator-03', name: 'Excavator Three', minerId: 'sol-arden', condition: 'nominal', dockingState: 'deployed', assignment: 'extraction', startedAt: now, completesAt: now + PRODUCTION_CYCLE_MS, cargo: 0, delivered: 0, run: 1, miningProgress: 0, cut: 'stable' },
+      { id: 'excavator-03', name: 'Excavator Three', minerId: 'sol-arden', condition: 'nominal', dockingState: 'docked', assignment: 'standby', startedAt: now, completesAt: null, cargo: 0, delivered: 0, run: 1, miningProgress: 0, cut: 'stable' },
       { id: 'hauler-02', name: 'Hauler Two', minerId: 'mara-vale', condition: 'nominal', dockingState: 'holding', assignment: 'standby', startedAt: now, completesAt: null, cargo: 0, delivered: 0, run: 0, miningProgress: 0, cut: 'stable' },
     ],
     repairDrones: [{ id: 'dr-01', targetId: null, completesAt: null }],
@@ -129,8 +132,8 @@ export function safeElapsed(from: number, now: number): number {
     ? Math.min(now - from, MAX_CATCHUP_MS) : 0
 }
 
-export function recordOperation(state: FacilityState, event: Omit<OperationalEvent, 'id'>): void {
-  state.operations.push({ ...event, id: `op-${state.nextOperationId++}` })
+export function recordOperation(state: FacilityState, event: Omit<OperationalEvent, 'id' | 'operationAgeMs'>): void {
+  state.operations.push({ ...event, operationAgeMs: operationAgeAt(state, event.timestamp), id: `op-${state.nextOperationId++}` })
   state.operations = state.operations.slice(-1000)
 }
 
@@ -224,7 +227,11 @@ export function applyPendingDecision(state: FacilityState, key: KeypadKey | null
 export function advanceFacility(state: FacilityState, now: number): void {
   if (!Number.isFinite(now) || now < state.lastProcessedAt) return
   const end = state.lastProcessedAt + safeElapsed(state.lastProcessedAt, now)
-  const elapsed = end - state.lastProcessedAt
+  if (!state.commissioned) {
+    state.facilityAgeMs += end - state.lastProcessedAt
+    state.lastProcessedAt = now
+    return
+  }
   for (const vessel of state.vessels) {
     if (vessel.condition === 'service-required' && vessel.assignment === 'extraction') {
       vessel.assignment = 'delivery'
@@ -242,6 +249,8 @@ export function advanceFacility(state: FacilityState, now: number): void {
     const next = Math.min(...deadlines)
     if (next > end) break
     const at = Math.max(state.lastProcessedAt, next)
+    state.facilityAgeMs += at - state.lastProcessedAt
+    state.lastProcessedAt = at
     if (pendingAt <= at) applyPendingDecision(state, null, at)
     const systems = state.systems
     if (systems.berthInspectionAt !== null && systems.berthInspectionAt <= at) {
@@ -341,7 +350,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
     for (const q of state.processingQueue) q.completesAt += skipped
     for (const field of ['berthInspectionAt', 'coolantInspectionAt', 'scannerCalibrationAt'] as const) if (state.systems[field] !== null) state.systems[field] += skipped
   }
-  state.facilityAgeMs += elapsed
+  state.facilityAgeMs += end - state.lastProcessedAt
   state.lastProcessedAt = now
 }
 
@@ -378,4 +387,14 @@ function dispatchRoutineService(state: FacilityState, at: number): void {
 
 function extractionDuration(cut: 'stable' | 'dense'): number {
   return PRODUCTION_CYCLE_MS + (cut === 'dense' ? 5 * 60_000 : 0)
+}
+
+export function commissionFacility(state: FacilityState, now: number): void {
+  if (state.commissioned) return
+  state.commissioned = true
+  const vessel = state.vessels.find((item) => item.id === 'excavator-03')!
+  vessel.assignment = 'extraction'
+  vessel.dockingState = 'deployed'
+  vessel.startedAt = now
+  vessel.completesAt = now + extractionDuration(vessel.cut)
 }

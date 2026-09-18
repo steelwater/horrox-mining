@@ -1,13 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const lifecycle = vi.hoisted(() => ({ mounted: [] as Array<() => void>, unmounted: [] as Array<() => void> }))
-const speech = vi.hoisted(() => ({ speak: vi.fn(), startAmbience: vi.fn().mockResolvedValue(undefined), playKeyTone: vi.fn(), stop: vi.fn() }))
+const speech = vi.hoisted(() => ({ speak: vi.fn(), speakExchange: vi.fn(), cancelChatter: vi.fn(), startAmbience: vi.fn().mockResolvedValue(undefined), playKeyTone: vi.fn(), stop: vi.fn() }))
 vi.mock('../src/audio/audioDirector', () => ({ AudioDirector: class { constructor() { return speech } } }))
 vi.mock('../src/game/persistence', () => ({ loadFacility: vi.fn().mockResolvedValue(null), saveFacility: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('vue', async (original) => ({ ...await original<typeof import('vue')>(), onMounted: (callback: () => void) => lifecycle.mounted.push(callback), onBeforeUnmount: (callback: () => void) => lifecycle.unmounted.push(callback) }))
 import { useFacility } from '../src/composables/useFacility'
 import { loadFacility, saveFacility } from '../src/game/persistence'
-import { createInitialState } from '../src/game/engine'
+import { commissionFacility, createInitialState } from '../src/game/engine'
+import { onboardingSteps } from '../src/game/onboarding'
 
 describe('spoken terminal commands', () => {
   beforeEach(() => { vi.clearAllMocks(); lifecycle.mounted = []; lifecycle.unmounted = [] })
@@ -25,6 +26,7 @@ describe('spoken terminal commands', () => {
     speech.startAmbience.mockReturnValueOnce(new Promise(() => {}))
     const facility = useFacility()
     facility.ready.value = true
+    commissionFacility(facility.state, Date.now())
     facility.state.onboardingStatus = 'complete'
     await facility.pressKey('0')
     expect(speech.speak.mock.calls.at(-1)![0]).toContain('1 mining vessel active')
@@ -34,6 +36,7 @@ describe('spoken terminal commands', () => {
   it('persists offline decisions before another immediate restart', async () => {
     vi.stubGlobal('window', { setInterval: vi.fn() })
     const saved = createInitialState(Date.now() - 360_000)
+    commissionFacility(saved, saved.lastProcessedAt)
     saved.onboardingStatus = 'complete'
     saved.pendingEvent = { eventId: 'problem-sensor-drift', requestedAt: saved.lastProcessedAt }
     vi.mocked(loadFacility).mockResolvedValueOnce(saved)
@@ -81,6 +84,7 @@ describe('spoken terminal commands', () => {
     vi.setSystemTime(1_800_000_000_000)
     const facility = useFacility()
     facility.ready.value = true
+    commissionFacility(facility.state, Date.now())
     facility.state.onboardingStatus = 'complete'
     await facility.pressKey('3')
     vi.setSystemTime(Date.now() + 300_000)
@@ -93,31 +97,57 @@ describe('spoken terminal commands', () => {
     vi.stubGlobal('window', { setInterval: vi.fn() })
     const saved = createInitialState(Date.now())
     saved.onboardingStatus = 'active'
-    saved.onboardingStep = 4
+    saved.onboardingStep = 9
     vi.mocked(loadFacility).mockResolvedValueOnce(saved)
     const facility = useFacility()
     await facility.initialize()
-    expect(speech.speak.mock.calls.at(-1)![0]).toBe('Press 9 to enable autopilot.')
-    expect(facility.state.onboardingStep).toBe(4)
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Press 9 to enable autopilot.')
+    expect(facility.state.onboardingStep).toBe(9)
   })
 
   it('enables real autopilot when the tutorial announces it', async () => {
     const facility = useFacility()
     facility.ready.value = true
     facility.state.onboardingStatus = 'active'
-    facility.state.onboardingStep = 4
+    facility.state.onboardingStep = 9
     await facility.pressKey('9')
     expect(facility.state.autopilotEnabled).toBe(true)
-    expect(facility.state.onboardingStep).toBe(5)
+    expect(facility.state.onboardingStep).toBe(10)
     const prompt = speech.speak.mock.calls.at(-1)![0]
     await facility.pressKey('0')
     expect(speech.speak.mock.calls.at(-2)![0]).toBe(prompt)
-    expect(facility.state.onboardingStep).toBe(6)
+    expect(facility.state.onboardingStep).toBe(11)
+  })
+
+  it('commissions through the full ordered sequence and does not restart work on readiness replay', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_800_000_000_000)
+    vi.stubGlobal('window', { setInterval: vi.fn() })
+    const facility = useFacility()
+    await facility.initialize()
+    expect(facility.state.commissioned).toBe(false)
+    for (const step of onboardingSteps) {
+      expect(facility.state.productionCycles).toBe(0)
+      vi.setSystemTime(Date.now() + 60_000)
+      await facility.pressKey(step.expectedKey)
+    }
+    expect(facility.state.onboardingStatus).toBe('complete')
+    expect(facility.state.commissioned).toBe(true)
+    expect(facility.state.autopilotEnabled).toBe(true)
+    expect(facility.state.vessels[0]?.assignment).toBe('extraction')
+    expect(speech.speak.mock.calls.every(([, profile]) => profile === 'terminal')).toBe(true)
+    const deadline = facility.state.vessels[0]!.completesAt
+    const age = facility.state.facilityAgeMs
+    facility.replayOnboarding()
+    facility.skipOnboarding()
+    expect(facility.state.vessels[0]!.completesAt).toBe(deadline)
+    expect(facility.state.facilityAgeMs).toBe(age)
   })
 
   it('repeats a pending request even after an invalid response without changing its deadline', async () => {
     const facility = useFacility()
     facility.ready.value = true
+    commissionFacility(facility.state, Date.now())
     facility.state.onboardingStatus = 'complete'
     await facility.pressKey('4')
     const request = speech.speak.mock.calls.at(-1)![0]
