@@ -44,7 +44,7 @@ Commands no longer wait for audio permission/resume, which could otherwise preve
 - TypeScript checking and production web build passed.
 - Capacitor Android/iOS asset synchronization and Android debug build passed using the existing Android Studio JDK and Gradle installation.
 - Playtest follow-up browser checks at 390 × 844 and 820 × 1180 verified migrated progress and lore dates, fresh commissioning, all readiness keys, checkpoint reload, safe delegation, transcript/history timestamps, and no console errors. Original browser checks covered: live status, empty history, docking request, reload with pending request intact, request repeat, keyboard response, and readable structured history. No layout overflow observed in these flows.
-- There is no configured lint script or repository CI workflow.
+- There is no configured lint script. Web CI was added in the 21 September follow-up below.
 
 ## Limits and next step
 
@@ -63,3 +63,7 @@ Following Dan’s PR #2 review, facility age now tracks full chronological elaps
 Dan’s physical-tablet screenshots exposed horizontal overflow and text overlap. Reproduced at an 800px viewport: the keypad grew to 838px and squeezed the readout to 165px. Removed key aspect-ratio sizing and percentage readout minimum height, made grid tracks shrinkable, and gave wide-screen columns independent heights. Below 1000px the terminal stacks; wider screens have a bounded 360px keypad. Hidden-text mode centers the keypad. Long content wraps and remains in normal document flow; pinch zoom remains enabled.
 
 Verified long readiness text, portrait reload, hidden text, and phone/tablet layouts at 320, 390, 700, 800, 999, 1000, and 1280px widths with no horizontal document overflow. Visually inspected 800×1280, 1280×800, and 390×844. All 58 tests, type checks, production build, and Capacitor sync passed. Physical-tablet confirmation of this correction remains Dan’s next check. No simulation, save, or voice changes.
+
+## CI follow-up — 21 September 2026
+
+Dan confirmed the physical-tablet fix and requested independent automated verification in [review 5244496098](https://github.com/steelwater/horrox-mining/pull/2#pullrequestreview-5244496098). The workflow runs on pull requests and pushes to main, uses Node 24 and cached npm downloads, installs with npm ci, then runs Tests, Typecheck, and Build. Official actions are pinned to commits, with read-only repository permissions. Native builds and optional branch protection remain later work. No production behavior, save, lore, or voice changes.

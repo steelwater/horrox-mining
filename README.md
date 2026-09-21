@@ -72,6 +72,10 @@ The mine persists vessels, miners, assignments, cargo, processing, routine drone
 
 See [implementation, migration, verification, and limitations](docs/milestone-2.md). Native listening and device lifecycle checks remain pending before acceptance.
 
+## Continuous integration
+
+GitHub Actions runs `npm ci`, `npm test`, `npm run typecheck`, and `npm run build` on Node 24 for pull requests and pushes to `main`. The **Tests, Typecheck, Build** check is web-only; native builds and branch protection remain separate follow-ups.
+
 ## Development
 
 ```sh
