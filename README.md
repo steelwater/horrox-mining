@@ -1,8 +1,8 @@
 # 1st Horrox Mining Ltd.
 
-An audio-first, mobile-only space mining simulation set in Horrox's orbit before the catastrophic events of Terminal Lore.
+An audio-first, mobile-only space mining simulation set on Minerva, the first moon of Horrox, before the catastrophic events of Terminal Lore.
 
-The player is the captain of a small orbital mining facility. Sound is the primary interface, a telephone-style keypad is the primary control, and the facility continues operating safely when the player does nothing.
+The player is the captain of a staffed mining facility on Minerva. Sound is the primary interface, a telephone-style keypad is the primary control, and the facility continues operating safely when the player does nothing.
 
 ## Project authority
 
@@ -15,7 +15,7 @@ The Google Drive brief is the canonical source for product scope, acceptance cri
 
 ## First-playable objective
 
-Prove that one small orbital facility, a tiny crew, one mining loop, one docking loop, and ambient chatter can feel alive while the phone sits beside the player.
+Prove that one small Minerva mining facility, a tiny crew, one mining loop, one docking loop, and ambient chatter can feel alive while the phone sits beside the player.
 
 The north-star test is:
 
@@ -57,13 +57,116 @@ Verification: 21 tests pass, including facility-level autopilot/repeat/resume re
 
 ## Canonical operation and lore
 
-The operation starts on **17 September 2075**. First run is the actual **Launch Day / Commissioning Sequence** for 1st Horrox Mining Ltd. Facility Control confirms its identity and the date, then guides mining-system, vessel, docking, power, processing, communications, repair-drone/support, crew, and autopilot checks before final readiness confirmation. Checks can be delegated safely; later readiness reviews do not restart the operation.
+This README is the canonical project-side source for **1st Horrox Mining Ltd. lore**. The separate `terminal-lore` repository will be synchronized from this canon later. Product scope and milestone acceptance criteria remain governed by the Drive briefs and milestone plan.
 
-Horrox orbital infrastructure predates this operation: the station exists from 2056, and Viajero and the first long-distance human crew reach the system in 2073. This staffed mining operation begins in 2075, before M2 destabilization on 23 August 2076. This project-side context was approved in [Dan's PR #2 playtest review](https://github.com/steelwater/horrox-mining/pull/2); Dan will synchronize the separate `terminal-lore` repository later.
+### Corporate and planetary setting
+
+**1st Horrox Mining Ltd.** is a **LightTech Corp subsidiary** responsible for LightTech's space-mining activity in the Horrox system.
+
+The operation is based on **Minerva**, Horrox's first moon. Horrox has **two known moons**:
+
+- **Minerva** — the established mining moon and home of this game's facility.
+- **M2** — the historical designation for Horrox's second moon, which later becomes central to the Terminal Lore catastrophe.
+
+Minerva mining infrastructure predates the staffed operation in this game. The earlier Terminal Lore chronology establishes an unmanned LightTech mining station on Minerva in **2054**, the Horrox orbital station in **2056**, the loss of Minerva mine communications in **2065**, and the arrival of Viajero and its long-distance human crew in **2073**, when the mine is restarted. **1st Horrox Mining Ltd. begins its staffed operation on 17 September 2075**, after those events and before M2 destabilization on **23 August 2076**.
+
+The Horrox orbital station remains a separate piece of infrastructure from the Minerva mining facility.
+
+### Launch Day
+
+The operation starts on **17 September 2075**. First run is the actual **Launch Day / Commissioning Sequence** for 1st Horrox Mining Ltd. Facility Control confirms its identity and the date, then guides mining-system, vessel, docking, power, processing, communications, repair-drone/support, crew, and autopilot checks before final readiness confirmation. Checks can be delegated safely; later readiness reviews do not restart the operation.
 
 The canonical launch date never changes with installation date, reinstall, cache clearing, save reset, locale, or timezone. A genuinely new save starts at 2075-09-17 00:00 station time. Existing saves preserve elapsed facility age and progress. The displayed calendar is launch date plus deterministic facility age: one second per elapsed real second, including the full duration of long absences. Only mining/processing catch-up work is capped at seven days. Both transcript and operational history use this station calendar; device timestamps remain internal for elapsed-time calculations.
 
-Current prototype identities are Excavator Three (`excavator-03`), Hauler Two (`hauler-02`), Berth Four, Processor One, repair drone DR-01, coolant pump two, and the ore scanner. The crew remains Mara Vale / Latch (docking), Iko Ren / Patch (maintenance), and Sol Arden / Deepwell (extraction). Crew names and banter remain prototype content pending approval; no new cast or final Facility AI name is introduced here. The existing **Mining Facility AI voice configuration remains unchanged**.
+### The Minerva Cluster and Hydronium
+
+Commercial Hydronium extraction is centered on the **Minerva Cluster**, a population of asteroids operating near Minerva. Surveyed mining targets use stable identifiers in the form:
+
+`MNV-####`
+
+The identifier is permanent; changing operational data is stored separately. A target can carry:
+
+- size class
+- current range from Minerva
+- bearing
+- relative altitude
+- estimated Hydronium concentration
+- mining state
+- later informal crew nickname
+
+The game can combine a curated starter registry with procedurally generated MNV targets. Normal miner traffic should naturally mention target assignment, departure, approach, visual contact, anchoring, drilling, concentration readings, loose fragments, extraction completion, and return to Minerva.
+
+Important asteroids may acquire crew nicknames without losing their official MNV registry code.
+
+### Hydronium production and export
+
+The normal production chain is:
+
+**Asteroid → Mining Vessel → Minerva Facility → Refining → Grading → Storage → Cargo Mech → Hydronium Transport → Mars**
+
+The facility therefore operates as more than a mine. It is also a processing, storage, maintenance, docking, and export hub.
+
+**Refinery** separates usable Hydronium-bearing material from incoming asteroid ore. **Grading** classifies processed material. **Storage** tracks and holds export batches until transport capacity is available.
+
+These departments have real crews, but their comms are intentionally quieter than miner chatter. They usually speak when they have something relevant to report: unusual yield, contamination, grade results, capacity pressure, inventory mismatch, equipment trouble, or another operational exception.
+
+### Cargo Mechs
+
+Heavy cargo is moved by industrial **Cargo Mechs** supervised by Cargo crew.
+
+Mechs retrieve containers from storage, move Hydronium through cargo decks, load and unload transports, reposition heavy equipment, and assist Maintenance with large components. They are industrial machines rather than sentient characters.
+
+Individual Mechs may nevertheless develop reputations through repeated maintenance quirks and crew chatter: a bad actuator, a noisy hydraulic system, a dislike of narrow routes, or another recurring fault can become part of facility folklore.
+
+### Mars transports
+
+Dedicated Hydronium transports use **HT-###** logistics identifiers.
+
+They travel between Mars and Minerva, carrying supplies, replacement equipment, mail, personnel, empty containers, and other cargo inbound, then departing with processed and graded Hydronium.
+
+Transport operations include:
+
+- inbound detection and approach
+- docking assignment and clearance
+- pressure and seal checks
+- unloading
+- maintenance and inspection
+- Hydronium loading
+- manifest verification
+- departure clearance
+- outbound Mars traffic
+
+Frequently visiting transports may acquire informal crew nicknames while retaining their official HT identifier.
+
+Visiting transports can require dockside help with docking collars, maneuvering thrusters, coolant, electrical systems, sensors, cargo hardware, hull inspection, or other routine spacecraft maintenance. Repair drones and Cargo Mechs can assist when appropriate.
+
+### Crew life and the Cantina
+
+The facility includes a shared off-shift recreation space known simply as **the Cantina**.
+
+Miners, Refinery, Grading, Storage, Cargo, Docking, Maintenance, visiting transport crews, and other personnel meet there after shifts for meals, drinks, games, music, old media, arguments, bets, celebrations, and ordinary social life.
+
+The game should rarely narrate complete Cantina scenes. Most Cantina events are discovered later through short fragments of working comms: somebody owes somebody a drink, a chair was broken, a card-game dispute continues into the next shift, an asteroid receives a ridiculous nickname, or a visiting transport crew is still being teased about the previous night.
+
+This lets off-duty life become **implied shared history** instead of a second nonstop dialogue channel.
+
+### Fran and The Kettle
+
+At Launch Day, neither informal name is established.
+
+The Mining Facility AI begins as **Facility AI / Control**. Through the later Milestone 9 relationship arc, the crew gradually gives it the informal name **Fran**. The existing Facility AI voice configuration is part of the game's identity and must remain unchanged unless explicitly requested.
+
+Likewise, the Minerva facility does **not** begin the game already named **The Kettle**. That nickname is earned later through the canonical **Kettle Incident** in Milestone 11. Afterward, repeated crew references and Cantina retellings gradually turn the incident into workplace folklore until “the Kettle” becomes the facility's accepted informal identity.
+
+This chronology matters: the player should live in the facility before its nicknames become history.
+
+### Tone of the pre-catastrophe era
+
+The 2075 operation is a functioning workplace and community, not a facility waiting around for disaster. Miners work asteroid assignments, refinery crews process ore, Cargo Mechs cross the loading decks, Mars transports arrive and leave, maintenance keeps aging equipment running, and people meet in the Cantina after shift.
+
+The later catastrophe is part of Terminal Lore, but everyday life should dominate this game. Ordinary routines, relationships, jokes, repairs, deliveries, and accumulated history are what give the later events their weight.
+
+Current prototype identities are Excavator Three (`excavator-03`), Hauler Two (`hauler-02`), Berth Four, Processor One, repair drone DR-01, coolant pump two, and the ore scanner. The crew remains Mara Vale / Latch (docking), Iko Ren / Patch (maintenance), and Sol Arden / Deepwell (extraction). Crew names and banter remain prototype content pending approval. The existing **Mining Facility AI voice configuration remains unchanged**.
 
 ## Milestone 2 — The Living Mine
 
