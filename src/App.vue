@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { formatOperationTime, operationDate } from './game/calendar'
 import { useFacility } from './composables/useFacility'
 import type { KeypadKey } from './game/types'
 
@@ -8,6 +9,7 @@ const {
   startAudio,
   state,
   ready,
+  storageError,
   initialize,
   displayMode,
   pendingEvent,
@@ -54,6 +56,11 @@ window.setTimeout(() => {
       <small>Prototype wordmark — official logo asset pending</small>
     </section>
 
+    <section v-else-if="!ready && storageError" class="readout" role="alert">
+      <p>{{ storageError }}</p>
+      <button @click="initialize">RETRY CONNECTION</button>
+    </section>
+
     <section v-else-if="ready" class="terminal" aria-label="Horrox Mining terminal">
       <header class="terminal-header">
         <div class="header-brand" aria-label="1st Horrox Mining Limited">
@@ -82,9 +89,11 @@ window.setTimeout(() => {
         </div>
       </header>
 
+      <p v-if="storageError" role="alert">{{ storageError }}</p>
+
       <section v-if="textDisplayVisible" class="readout" aria-live="polite">
         <div class="readout-meta">
-          <span>FACILITY AGE {{ facilityAgeHours }}H</span>
+          <span>{{ formatOperationTime(state.facilityAgeMs) }} // {{ facilityAgeHours }}H</span>
           <span>{{ state.autopilotEnabled ? 'AUTOPILOT' : 'CAPTAIN CONTROL' }}</span>
         </div>
         <article v-if="latestTranscript[0]" class="current-message">
@@ -109,7 +118,7 @@ window.setTimeout(() => {
           @click="pressKey(key)"
         >
           <span>{{ key }}</span>
-          <small v-if="key === '0'">REPEAT</small>
+          <small v-if="key === '0'">REPEAT / STATUS</small>
           <small v-else-if="key === '*'">BACK</small>
           <small v-else-if="key === '#'">ENTER</small>
         </button>
@@ -117,16 +126,29 @@ window.setTimeout(() => {
 
       <section class="terminal-actions" aria-label="Terminal options">
         <button @click.stop="cycleDisplayMode">DISPLAY: {{ displayMode.toUpperCase() }}</button>
-        <button v-if="onboardingActive" @click="skipOnboarding">SKIP ONBOARDING</button>
-        <button v-else @click="replayOnboarding">REPLAY ONBOARDING</button>
+        <button v-if="onboardingActive" @click="skipOnboarding">DELEGATE CHECKS</button>
+        <button v-else @click="replayOnboarding">REVIEW READINESS</button>
       </section>
 
       <details class="transcript">
         <summary>TRANSCRIPT // {{ state.transcript.length }} MESSAGES</summary>
         <ol>
           <li v-for="entry in latestTranscript" :key="entry.id">
+            <time :datetime="operationDate(entry.operationAgeMs).toISOString()">{{ formatOperationTime(entry.operationAgeMs) }}</time>
             <span>{{ entry.speaker }}</span>
             <p>{{ entry.text }}</p>
+          </li>
+        </ol>
+      </details>
+
+      <details class="transcript">
+        <summary>OPERATIONAL HISTORY // {{ state.operations.length }} EVENTS</summary>
+        <ol>
+          <li v-for="entry in [...state.operations].reverse()" :key="entry.id">
+            <time :datetime="operationDate(entry.operationAgeMs).toISOString()">{{ formatOperationTime(entry.operationAgeMs) }}</time>
+            <span>{{ entry.source }} // {{ entry.resolution }}</span>
+            <p>{{ entry.summary }}</p>
+            <p v-if="entry.reason">Reason: {{ entry.reason }}</p>
           </li>
         </ol>
       </details>

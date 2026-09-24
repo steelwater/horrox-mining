@@ -53,9 +53,21 @@ export type PendingEvent = {
 }
 
 export type FacilityState = {
-  version: 1
+  version: 3
+  operationStart: '2075-09-17'
+  commissioned: boolean
+  lastProcessedAt: number
+  lastActiveAt: number
+  miners: Miner[]
+  vessels: Vessel[]
+  repairDrones: RepairDrone[]
+  processingQueue: ProcessingLoad[]
+  systems: FacilitySystems
+  operations: OperationalEvent[]
+  nextOperationId: number
   createdAt: number
   lastSavedAt: number
+  /** Chronological elapsed time, independent of the simulation catch-up limit. */
   facilityAgeMs: number
   productionCycles: number
   oreProcessed: number
@@ -74,5 +86,61 @@ export type TranscriptEntry = {
   speaker: string
   text: string
   timestamp: number
+  operationAgeMs: number
   priority: AudioPriority
 }
+
+// UTC epoch milliseconds are used for every persisted timestamp.
+export type Vessel = {
+  id: string
+  name: string
+  minerId: string
+  condition: 'nominal' | 'service-required'
+  dockingState: 'deployed' | 'returning' | 'docked' | 'holding' | 'approaching'
+  assignment: 'extraction' | 'delivery' | 'standby' | 'approach'
+  startedAt: number
+  completesAt: number | null
+  cargo: number
+  delivered: number
+  run: number
+  miningProgress: number
+  cut: 'stable' | 'dense'
+}
+
+export type RepairDrone = {
+  id: string
+  targetId: string | null
+  completesAt: number | null
+}
+
+export type ProcessingLoad = {
+  id: string
+  vesselId: string
+  tonnes: number
+  completesAt: number
+}
+
+export type FacilitySystems = {
+  berth: 'open' | 'isolated'
+  berthInspectionAt: number | null
+  coolant: 'nominal' | 'inspection'
+  coolantInspectionAt: number | null
+  scanner: 'nominal' | 'manual-sampling'
+  scannerCalibrationAt: number | null
+}
+
+export type OperationalEvent = {
+  id: string
+  timestamp: number
+  operationAgeMs: number
+  source: string
+  category: EventType | 'processing'
+  summary: string
+  relatedIds: string[]
+  actionRequested: boolean
+  resolution: 'pending' | 'manual' | 'autonomous'
+  reason: string | null
+}
+
+export type ChatterLine = { speaker: string; profile: string; text: string }
+export type ChatterExchange = { id: string; lines: ChatterLine[] }
