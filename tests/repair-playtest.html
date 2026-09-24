@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Milestone 3 local playtest</title>
+<style>body{font:16px system-ui;background:#eee;color:#111}button,select{padding:10px;margin:4px}iframe{display:block;border:1px solid #888;height:844px;max-width:100%}p{max-width:800px}</style></head>
+<body><h1>Milestone 3 local playtest</h1><p>Development fixture only. Use a dedicated localhost port with disposable storage. Scenario buttons replace only the test origin’s save. The embedded terminal is the real app.</p>
+<select id="scenario" aria-label="Scenario"><option value="drill-wear">A — Degraded drill</option><option value="sensor-degradation">B — Remote sensor repair</option><option value="thruster-malfunction">C — Unattended thruster fault</option><option value="disabled">D — Disabled vessel</option><option value="competing">E — Competing repair demand</option><option value="away">F — Return after absence</option><option value="hull-damage">Dock repair</option></select>
+<button id="load">Load scenario</button><button id="advance">Advance 20 minutes and reload</button><button id="phone">Phone 390px</button><button id="tablet">Tablet 800px</button><p id="result" role="status">No scenario loaded.</p><iframe title="Real Horrox terminal" id="terminal" width="390"></iframe>
+<script type="module">
+import { createInitialState, commissionFacility } from '/src/game/engine.ts'
+import { detectFault, decideRepair, escalateFault } from '/src/game/repairs.ts'
+import { loadFacility, saveFacility } from '/src/game/persistence.ts'
+const frame = document.querySelector('#terminal')
+const result = document.querySelector('#result')
+document.querySelector('#phone').onclick = () => frame.width = '390'
+document.querySelector('#tablet').onclick = () => frame.width = '800'
+document.querySelector('#load').onclick = async () => {
+  frame.src = 'about:blank'
+  await new Promise(resolve => frame.onload = resolve)
+  const scenario = document.querySelector('#scenario').value
+  const now = Date.now()
+  const state = createInitialState(now)
+  commissionFacility(state, now)
+  state.onboardingStatus = 'complete'
+  const vessel = state.vessels[0]
+  const fault = detectFault(state, vessel.id, scenario === 'disabled' ? 'thruster-malfunction' : ['competing', 'away'].includes(scenario) ? 'sensor-degradation' : scenario, now)
+  if (scenario === 'disabled') escalateFault(state, vessel, fault, now, true)
+  if (scenario === 'competing' || scenario === 'away') decideRepair(state, vessel, fault, 'drone', now)
+  if (scenario === 'competing') detectFault(state, state.vessels[1].id, 'thruster-malfunction', now)
+  await saveFacility(state)
+  frame.src = '/?playtest=' + now
+  result.textContent = 'Loaded ' + scenario + '. Use the terminal keypad.'
+}
+document.querySelector('#advance').onclick = async () => {
+  // Unload the active terminal before changing its saved clock.
+  frame.src = 'about:blank'
+  await new Promise(resolve => frame.onload = resolve)
+  const state = await loadFacility()
+  if (!state) return
+  const offset = 20 * 60_000
+  // Move the entire snapshot into the past, retaining all relative deadlines.
+  const timestamps = new Set(['createdAt','lastSavedAt','lastActiveAt','lastProcessedAt','startedAt','completesAt','requestedAt','timestamp','detectedAt','decisionAt','escalatesAt','resolvedAt','dispatchedAt','serviceStartedAt','completedAt','nextAt','transitStartedAt','berthInspectionAt','coolantInspectionAt','scannerCalibrationAt'])
+  function shift(value) { if (!value || typeof value !== 'object') return; for (const key of Object.keys(value)) { if (timestamps.has(key) && typeof value[key] === 'number') value[key] -= offset; else shift(value[key]) } }
+  shift(state)
+  await saveFacility(state)
+  frame.src = '/?playtest=' + Date.now()
+  result.textContent = 'Returned after twenty minutes. Inspect the briefing and history.'
+}
+</script></body></html>

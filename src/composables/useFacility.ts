@@ -1,3 +1,4 @@
+import { activeFaults, activeJob, decideRepair, droneStatus, pendingFaults, repairMenu, repairOptions, vesselRepairStatus } from '../game/repairs'
 import { operationAgeAt } from '../game/calendar'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { AudioDirector } from '../audio/audioDirector'
@@ -29,9 +30,10 @@ export function useFacility() {
   let suspendedAt: number | null = null
   const displayMode = ref<'standard' | 'dim' | 'black'>('standard')
   const lastMessage = ref('')
+  const supportFaultId = ref<string | null>(null)
   const timers: number[] = []
 
-  const pendingEvent = computed(() => state.pendingEvent ? findEvent(state.pendingEvent.eventId) : null)
+  const pendingEvent = computed(() => state.pendingEvent ? findEvent(state.pendingEvent.eventId) : pendingFaults(state).length ? { type: 'vessel support' } : null)
   const onboardingActive = computed(() => state.onboardingStatus === 'active')
   const facilityAgeHours = computed(() => Math.floor(state.facilityAgeMs / 3_600_000))
 
@@ -98,10 +100,11 @@ export function useFacility() {
   async function pressKey(key: KeypadKey): Promise<void> {
     if (!ready.value) return
     audio.cancelChatter()
+    const repairAtInput = pendingFaults(state).map(({ fault }) => fault.id)
     const requestAtInput = state.pendingEvent
     tick()
     // An expired response must not become an unrelated top-level command.
-    if (requestAtInput && !state.pendingEvent && key !== '0') {
+    if (((requestAtInput && !state.pendingEvent) || (supportFaultId.value && repairAtInput.includes(supportFaultId.value) && !pendingFaults(state).some(({ fault }) => fault.id === supportFaultId.value))) && key !== '0') {
       await persist()
       return
     }
@@ -128,10 +131,49 @@ export function useFacility() {
       return
     }
 
+    const faults = state.vessels.flatMap((vessel) => activeFaults(vessel).map((fault) => ({ vessel, fault })))
+    let selected = faults.find(({ fault }) => fault.id === supportFaultId.value)
+    if (supportFaultId.value && !selected) {
+      supportFaultId.value = null
+      announce('Vessel service complete. Main terminal. Press 0 for status.')
+      await persist()
+      return
+    }
+    if (selected) {
+      if (key === '*') {
+        supportFaultId.value = null
+        announce('Main terminal. Crew response deadlines remain active.')
+      } else if (key === '#') {
+        selected = faults[(faults.indexOf(selected) + 1) % faults.length]!
+        supportFaultId.value = selected.fault.id
+        announce(repairMenu(state, selected.vessel, selected.fault))
+      } else if (key === '0') announce(repairMenu(state, selected.vessel, selected.fault))
+      else {
+        const option = repairOptions(state, selected.vessel, selected.fault)[key]
+        announce(option ? decideRepair(state, selected.vessel, selected.fault, option.action, Date.now()) : 'That response is unavailable. Press 0 for current repair choices.', 'Facility Control', 'terminal', 2)
+      }
+      await persist()
+      return
+    }
+    const channelFault = key === '1' ? faults.find(({ fault }) => fault.emergency)
+      : key === '3' ? faults[0]
+        : key === '4' ? faults.find(({ vessel, fault }) => ['docked', 'approaching', 'returning'].includes(vessel.dockingState) || activeJob(state, fault)?.method === 'dock') : undefined
+    if (channelFault) {
+      supportFaultId.value = channelFault.fault.id
+      announce(repairMenu(state, channelFault.vessel, channelFault.fault), 'Facility Control', 'terminal', channelFault.fault.emergency ? 1 : 2)
+      await persist()
+      return
+    }
+    if (key === '8' && faults.length) {
+      announce(droneStatus(state))
+      await persist()
+      return
+    }
+
     if (state.pendingEvent) {
       if (key === '0') {
         const event = findEvent(state.pendingEvent.eventId)!
-        announce(event.spokenLines.join(' '), speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority)
+        announce(`${event.spokenLines.join(' ')}${faults.length ? ` ${faults.map(({ vessel, fault }) => vesselRepairStatus(state, vessel, fault)).join(' ')}` : ''}`, speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority)
         return
       }
       const message = applyPendingDecision(state, key, Date.now())
@@ -178,7 +220,8 @@ export function useFacility() {
     advanceFacility(state, Date.now())
     state.lastActiveAt = Math.max(state.lastActiveAt, Date.now())
     if (state.nextOperationId !== before) {
-      const latest = state.operations.at(-1)!
+      const fresh = state.operations.filter((entry) => Number(entry.id.replace('op-', '')) >= before)
+      const latest = fresh.find((entry) => entry.repair && entry.resolution === 'pending') ?? fresh.find((entry) => entry.category === 'safety') ?? state.operations.at(-1)!
       if (state.onboardingStatus !== 'active') announce(latest.summary, 'Facility Control', 'terminal', 2)
       void persist()
     }
@@ -203,7 +246,7 @@ export function useFacility() {
   }
 
   function emitChatter(): void {
-    if (!ready.value || suspendedAt !== null || state.onboardingStatus === 'active' || state.pendingEvent) return
+    if (!ready.value || suspendedAt !== null || state.onboardingStatus === 'active' || state.pendingEvent || pendingFaults(state).length) return
     const exchange = chatter[Math.floor(Math.random() * chatter.length)]!
     audio.speakExchange(exchange.lines, (line) => {
       recordTranscript(line.text, line.speaker, 5)
