@@ -53,7 +53,7 @@ export type PendingEvent = {
 }
 
 export type FacilityState = {
-  version: 3
+  version: 4
   operationStart: '2075-09-17'
   commissioned: boolean
   lastProcessedAt: number
@@ -61,6 +61,8 @@ export type FacilityState = {
   miners: Miner[]
   vessels: Vessel[]
   repairDrones: RepairDrone[]
+  repairJobs: RepairJob[]
+  nextRepairId: number
   processingQueue: ProcessingLoad[]
   systems: FacilitySystems
   operations: OperationalEvent[]
@@ -95,7 +97,13 @@ export type Vessel = {
   id: string
   name: string
   minerId: string
-  condition: 'nominal' | 'service-required'
+  condition: VesselCondition
+  routineServiceDue: boolean
+  activeFaults: VesselFault[]
+  serviceHistory: string[]
+  operatingRuns: number
+  lastFaultRun: number
+  resumeAfterRepair: boolean
   dockingState: 'deployed' | 'returning' | 'docked' | 'holding' | 'approaching'
   assignment: 'extraction' | 'delivery' | 'standby' | 'approach'
   startedAt: number
@@ -109,8 +117,16 @@ export type Vessel = {
 
 export type RepairDrone = {
   id: string
+  name: string
   targetId: string | null
   completesAt: number | null
+  state: 'available' | 'dispatched' | 'in-transit' | 'servicing' | 'returning' | 'maintenance' | 'unavailable'
+  location: string
+  assignedJobId: string | null
+  transitStartedAt: number | null
+  serviceStartedAt: number | null
+  maintenanceDue: boolean
+  serviceHistory: string[]
 }
 
 export type ProcessingLoad = {
@@ -140,7 +156,57 @@ export type OperationalEvent = {
   actionRequested: boolean
   resolution: 'pending' | 'manual' | 'autonomous'
   reason: string | null
+  operationCode?: number
+  repair?: RepairRecord
 }
 
 export type ChatterLine = { speaker: string; profile: string; text: string }
 export type ChatterExchange = { id: string; lines: ChatterLine[] }
+
+export type VesselCondition = 'nominal' | 'degraded' | 'fault' | 'critical' | 'offline'
+export type FaultType = 'drill-wear' | 'thruster-malfunction' | 'sensor-degradation' | 'hull-damage' | 'communications-failure' | 'cargo-jam' | 'power-instability' | 'navigation-fault'
+export type RepairAction = 'diagnostics' | 'drone' | 'dock' | 'safe-return' | 'continue' | 'stop' | 'crew' | 'recommend'
+export type VesselFault = {
+  id: string
+  type: FaultType
+  severity: VesselCondition
+  detectedAt: number
+  decisionAt: number | null
+  escalatesAt: number | null
+  resolvedAt: number | null
+  action: RepairAction | null
+  operationCode: number
+  emergency: boolean
+}
+export type RepairJob = {
+  id: string
+  vesselId: string
+  faultId: string
+  method: 'remote-drone' | 'dock'
+  assignedDroneId: string | null
+  state: 'waiting' | 'dispatched' | 'in-transit' | 'returning-vessel' | 'docking' | 'servicing' | 'complete'
+  createdAt: number
+  dispatchedAt: number | null
+  serviceStartedAt: number | null
+  completedAt: number | null
+  nextAt: number | null
+  outcome: 'restored' | null
+}
+export type RepairRecord = {
+  vesselId: string
+  faultId: string
+  faultType: FaultType
+  subsystem: string
+  severity: VesselCondition
+  conditionBefore: VesselCondition
+  conditionAfter: VesselCondition
+  detectedAt: number
+  actor: string
+  action: RepairAction | null
+  droneId: string | null
+  jobId: string | null
+  serviceStartedAt: number | null
+  completedAt: number | null
+  outcome: 'restored' | null
+  availability: 'working' | 'available' | 'unavailable'
+}

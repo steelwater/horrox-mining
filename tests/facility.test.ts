@@ -8,6 +8,7 @@ vi.mock('vue', async (original) => ({ ...await original<typeof import('vue')>(),
 import { useFacility } from '../src/composables/useFacility'
 import { loadFacility, saveFacility } from '../src/game/persistence'
 import { commissionFacility, createInitialState } from '../src/game/engine'
+import { detectFault } from '../src/game/repairs'
 import { onboardingSteps } from '../src/game/onboarding'
 
 describe('spoken terminal commands', () => {
@@ -157,4 +158,50 @@ describe('spoken terminal commands', () => {
     expect(speech.speak.mock.calls.at(-1)![0]).toBe(request)
     expect(facility.state.pendingEvent).toEqual(pending)
   })
+  it('routes vessel support through mining and preserves deadlines across repeat, diagnostics and back', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_800_000_000_000)
+    const facility = useFacility()
+    facility.ready.value = true
+    commissionFacility(facility.state, Date.now())
+    facility.state.onboardingStatus = 'complete'
+    const vessel = facility.state.vessels[0]!
+    const fault = detectFault(facility.state, vessel.id, 'sensor-degradation', Date.now())!
+    const deadline = fault.decisionAt
+    await facility.pressKey('3')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Press 2 for dispatch repair drone')
+    await facility.pressKey('1')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('2 0 1. Diagnostics requested')
+    await facility.pressKey('0')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Condition DEGRADED')
+    await facility.pressKey('*')
+    expect(fault.decisionAt).toBe(deadline)
+    await facility.pressKey('3')
+    await facility.pressKey('2')
+    expect(facility.state.repairDrones[0]?.state).toBe('dispatched')
+    await facility.pressKey('0')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Drone support dispatched')
+    await facility.pressKey('*')
+    await facility.pressKey('8')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Repair Drone One: dispatched')
+  })
+
+  it('opens urgent recovery even during an ordinary pending request, and ignores an expired repair choice', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_800_000_000_000)
+    const facility = useFacility()
+    facility.ready.value = true
+    commissionFacility(facility.state, Date.now())
+    facility.state.onboardingStatus = 'complete'
+    await facility.pressKey('4')
+    detectFault(facility.state, facility.state.vessels[0]!.id, 'power-instability', Date.now())
+    await facility.pressKey('1')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Power instability')
+    vi.setSystemTime(Date.now() + 300_000)
+    await facility.pressKey('1')
+    expect(facility.state.repairJobs).toHaveLength(1)
+    expect(facility.state.operations.some((e) => e.operationCode === 201)).toBe(false)
+    expect(facility.state.systems.berth).toBe('open')
+  })
+
 })

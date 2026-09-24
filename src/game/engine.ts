@@ -1,3 +1,4 @@
+import { activeFaults, advanceRepairs, detectOperationalWear, droneStatus, miningEfficiency, pendingFaults, repairDeadlines, scheduleRepairs, vesselRepairStatus } from './repairs'
 import { OPERATION_START, operationAgeAt } from './calendar'
 import { events, miners } from './content'
 import type { EventDefinition, FacilityState, KeypadKey, PendingEvent, OperationalEvent } from './types'
@@ -68,17 +69,19 @@ export function resolvePendingEvent(
 
 export function createInitialState(now: number): FacilityState {
   return {
-    version: 3,
+    version: 4,
     operationStart: OPERATION_START,
     commissioned: false,
     lastProcessedAt: now,
     lastActiveAt: now,
     miners: JSON.parse(JSON.stringify(miners)),
     vessels: [
-      { id: 'excavator-03', name: 'Excavator Three', minerId: 'sol-arden', condition: 'nominal', dockingState: 'docked', assignment: 'standby', startedAt: now, completesAt: null, cargo: 0, delivered: 0, run: 1, miningProgress: 0, cut: 'stable' },
-      { id: 'hauler-02', name: 'Hauler Two', minerId: 'mara-vale', condition: 'nominal', dockingState: 'holding', assignment: 'standby', startedAt: now, completesAt: null, cargo: 0, delivered: 0, run: 0, miningProgress: 0, cut: 'stable' },
+      { id: 'excavator-03', name: 'Excavator Three', minerId: 'sol-arden', condition: 'nominal', routineServiceDue: false, activeFaults: [], serviceHistory: [], operatingRuns: 0, lastFaultRun: 0, resumeAfterRepair: false, dockingState: 'docked', assignment: 'standby', startedAt: now, completesAt: null, cargo: 0, delivered: 0, run: 1, miningProgress: 0, cut: 'stable' },
+      { id: 'hauler-02', name: 'Hauler Two', minerId: 'mara-vale', condition: 'nominal', routineServiceDue: false, activeFaults: [], serviceHistory: [], operatingRuns: 0, lastFaultRun: 0, resumeAfterRepair: false, dockingState: 'holding', assignment: 'standby', startedAt: now, completesAt: null, cargo: 0, delivered: 0, run: 0, miningProgress: 0, cut: 'stable' },
     ],
-    repairDrones: [{ id: 'dr-01', targetId: null, completesAt: null }],
+    repairDrones: [{ id: 'dr-01', name: 'Repair Drone One', targetId: null, completesAt: null, state: 'available', location: 'facility', assignedJobId: null, transitStartedAt: null, serviceStartedAt: null, maintenanceDue: false, serviceHistory: [] }],
+    repairJobs: [],
+    nextRepairId: 1,
     processingQueue: [],
     systems: { berth: 'open', berthInspectionAt: null, coolant: 'nominal', coolantInspectionAt: null, scanner: 'nominal', scannerCalibrationAt: null },
     operations: [],
@@ -137,8 +140,8 @@ export function recordOperation(state: FacilityState, event: Omit<OperationalEve
   state.operations = state.operations.slice(-1000)
 }
 
-function routine(state: FacilityState, timestamp: number, source: string, category: OperationalEvent['category'], summary: string, relatedIds: string[], reason: string): void {
-  recordOperation(state, { timestamp, source, category, summary, relatedIds, actionRequested: false, resolution: 'autonomous', reason })
+function routine(state: FacilityState, timestamp: number, source: string, category: OperationalEvent['category'], summary: string, relatedIds: string[], reason: string, operationCode?: number): void {
+  recordOperation(state, { timestamp, source, category, summary, relatedIds, actionRequested: false, resolution: 'autonomous', reason, ...(operationCode ? { operationCode } : {}) })
 }
 
 export function beginRequest(state: FacilityState, eventId: string, now: number): boolean {
@@ -233,7 +236,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
     return
   }
   for (const vessel of state.vessels) {
-    if (vessel.condition === 'service-required' && vessel.assignment === 'extraction') {
+    if (vessel.routineServiceDue && vessel.assignment === 'extraction') {
       vessel.assignment = 'delivery'
       vessel.dockingState = 'returning'
       vessel.startedAt = state.lastProcessedAt
@@ -242,10 +245,11 @@ export function advanceFacility(state: FacilityState, now: number): void {
     }
   }
   dispatchRoutineService(state, state.lastProcessedAt)
+  scheduleRepairs(state, state.lastProcessedAt)
   while (true) {
     const pendingAt = state.pendingEvent
       ? state.pendingEvent.requestedAt + (findEvent(state.pendingEvent.eventId)?.responseTimeoutMs ?? 0) : Infinity
-    const deadlines = [pendingAt, ...state.vessels.map((v) => v.completesAt ?? Infinity), ...state.repairDrones.map((d) => d.completesAt ?? Infinity), ...state.processingQueue.map((q) => q.completesAt), state.systems.berthInspectionAt ?? Infinity, state.systems.coolantInspectionAt ?? Infinity, state.systems.scannerCalibrationAt ?? Infinity]
+    const deadlines = [...repairDeadlines(state), pendingAt, ...state.vessels.map((v) => v.completesAt ?? Infinity), ...state.repairDrones.map((d) => d.completesAt ?? Infinity), ...state.processingQueue.map((q) => q.completesAt), state.systems.berthInspectionAt ?? Infinity, state.systems.coolantInspectionAt ?? Infinity, state.systems.scannerCalibrationAt ?? Infinity]
     const next = Math.min(...deadlines)
     if (next > end) break
     const at = Math.max(state.lastProcessedAt, next)
@@ -268,20 +272,24 @@ export function advanceFacility(state: FacilityState, now: number): void {
       systems.scannerCalibrationAt = null
       routine(state, at, 'facility', 'maintenance', 'Ore scanner calibration complete.', ['scanner'], 'Automatic calibration restored reliable readings.')
     }
+    advanceRepairs(state, at)
     for (const drone of state.repairDrones) {
+      if (drone.assignedJobId !== null || drone.state !== 'servicing') continue
       if (drone.completesAt === null || drone.completesAt > at) continue
       const vessel = state.vessels.find((v) => v.id === drone.targetId)
       if (vessel) {
-        vessel.condition = 'nominal'
-        vessel.assignment = 'extraction'
-        vessel.dockingState = 'deployed'
+        vessel.routineServiceDue = false
+        vessel.assignment = activeFaults(vessel).length ? 'standby' : 'extraction'
+        vessel.dockingState = activeFaults(vessel).length ? 'docked' : 'deployed'
         vessel.startedAt = at
-        vessel.completesAt = at + extractionDuration(vessel.cut)
+        vessel.completesAt = vessel.assignment === 'extraction' ? at + extractionDuration(vessel.cut) : null
         vessel.run++
-        routine(state, at, drone.id, 'maintenance', `${drone.id.toUpperCase()} completed routine service on ${vessel.name}. Extraction resumed.`, [drone.id, vessel.id], 'Routine service completed before redeployment.')
+        routine(state, at, drone.id, 'maintenance', `${drone.id.toUpperCase()} completed routine service on ${vessel.name}. ${activeFaults(vessel).length ? 'Vessel remains held for fault repair.' : 'Extraction resumed.'}`, [drone.id, vessel.id], 'Routine service completed before redeployment.', 245)
       }
       drone.targetId = null
       drone.completesAt = null
+      drone.state = 'available'
+      drone.location = 'facility'
     }
     for (const vessel of state.vessels) {
       if (vessel.completesAt === null || vessel.completesAt > at) continue
@@ -293,22 +301,27 @@ export function advanceFacility(state: FacilityState, now: number): void {
         vessel.startedAt = at
         vessel.completesAt = at + TRANSIT_MS
         state.productionCycles++
-        routine(state, at, vessel.minerId, 'mining', `${vessel.name} completed extraction run ${vessel.run}. Returning with ${vessel.cargo} tonnes.`, [vessel.id, vessel.minerId], 'The assigned run is complete. Crew is delivering the cargo.')
+        detectOperationalWear(state, vessel, 'extraction', at)
+        routine(state, at, vessel.minerId, 'mining', `${vessel.name} completed extraction run ${vessel.run}. Returning with ${vessel.cargo} tonnes.`, [vessel.id, vessel.minerId], 'The assigned run is complete. Crew is delivering the cargo.', 112)
       } else if (state.systems.berth === 'isolated') {
         vessel.completesAt = state.systems.berthInspectionAt ?? at + SERVICE_MS
         vessel.dockingState = 'holding'
         routine(state, at, 'facility', 'docking', `${vessel.name} is holding clear of Berth Four.`, [vessel.id, 'berth-04'], 'Docking awaits a safe berth.')
       } else if (vessel.assignment === 'delivery') {
+        vessel.dockingState = 'docked'
+        detectOperationalWear(state, vessel, 'delivery', at)
+        if (activeFaults(vessel).some((f) => f.type === 'cargo-jam')) continue
         const tonnes = vessel.cargo
         vessel.delivered += tonnes
         vessel.cargo = 0
         const startsAt = Math.max(at, ...state.processingQueue.map((load) => load.completesAt))
         if (tonnes > 0) state.processingQueue.push({ id: `${vessel.id}-run-${vessel.run}`, vesselId: vessel.id, tonnes, completesAt: startsAt + PROCESSING_MS })
-        routine(state, at, vessel.minerId, 'docking', `${vessel.name} delivered ${tonnes} tonnes to Processor One.`, [vessel.id, 'processor-01'], 'Cargo transferred before the next assignment.')
+        routine(state, at, vessel.minerId, 'docking', tonnes > 0 ? `${vessel.name} delivered ${tonnes} tonnes to Processor One.` : `${vessel.name} returned safely. Preparing the next assignment.`, [vessel.id, 'processor-01'], 'Cargo transferred before the next assignment.', 165)
         vessel.miningProgress = 0
         // A routine service stop every fourth run; no damage is caused by absence.
-        if (vessel.condition === 'service-required' || vessel.run % 4 === 0) {
-          vessel.condition = 'service-required'
+        if (vessel.routineServiceDue || vessel.run % 4 === 0 || activeFaults(vessel).some((f) => f.action !== 'continue')) {
+          vessel.routineServiceDue ||= vessel.run % 4 === 0
+          vessel.resumeAfterRepair ||= activeFaults(vessel).length > 0
           vessel.assignment = 'standby'
           vessel.dockingState = 'docked'
           vessel.completesAt = null
@@ -317,15 +330,16 @@ export function advanceFacility(state: FacilityState, now: number): void {
           vessel.assignment = 'extraction'
           vessel.dockingState = 'deployed'
           vessel.startedAt = at
-          vessel.completesAt = at + extractionDuration(vessel.cut)
+          vessel.completesAt = miningEfficiency(vessel) > 0 ? at + extractionDuration(vessel.cut) / miningEfficiency(vessel) : null
         }
       } else {
         vessel.assignment = 'standby'
         vessel.dockingState = 'docked'
         vessel.completesAt = null
-        routine(state, at, vessel.minerId, 'docking', `${vessel.name} is secured at Berth Four.`, [vessel.id], 'Standard approach completed safely.')
+        routine(state, at, vessel.minerId, 'docking', `${vessel.name} is secured at Berth Four.`, [vessel.id], 'Standard approach completed safely.', 140)
       }
     }
+    scheduleRepairs(state, at)
     dispatchRoutineService(state, at)
     for (const load of state.processingQueue.filter((q) => q.completesAt <= at)) {
       state.oreProcessed += load.tonnes
@@ -347,6 +361,11 @@ export function advanceFacility(state: FacilityState, now: number): void {
   if (skipped > 0) {
     for (const v of state.vessels) { v.startedAt += skipped; if (v.completesAt !== null) v.completesAt += skipped }
     for (const d of state.repairDrones) if (d.completesAt !== null) d.completesAt += skipped
+    for (const j of state.repairJobs) if (j.nextAt !== null) j.nextAt += skipped
+    for (const v of state.vessels) for (const f of activeFaults(v)) {
+      if (f.decisionAt !== null) f.decisionAt += skipped
+      if (f.escalatesAt !== null) f.escalatesAt += skipped
+    }
     for (const q of state.processingQueue) q.completesAt += skipped
     for (const field of ['berthInspectionAt', 'coolantInspectionAt', 'scannerCalibrationAt'] as const) if (state.systems[field] !== null) state.systems[field] += skipped
   }
@@ -360,29 +379,39 @@ export function operationalStatus(state: FacilityState): string {
   const docked = state.vessels.filter((v) => v.dockingState === 'docked').length
   const travelling = state.vessels.length - active - docked
   const assigned = state.repairDrones.filter((d) => d.targetId !== null).length
+  const available = state.repairDrones.filter((d) => d.state === 'available' && !d.maintenanceDue).length
   const warnings = [state.systems.berth === 'isolated' ? 'Berth Four isolated.' : '', state.systems.coolant === 'inspection' ? 'Coolant inspection in progress.' : '', state.systems.scanner === 'manual-sampling' ? 'Manual sampling active during scanner calibration.' : ''].filter(Boolean)
-  return `${active} mining vessel active. ${docked} docked. ${travelling} in transit or holding. ${state.pendingEvent ? 1 : 0} crew request awaiting attention. ${assigned} repair drones assigned. ${state.repairDrones.length - assigned} available. Processor One has ${state.processingQueue.length} queued loads. ${warnings.join(' ') || 'No major facility warnings.'} ${state.pendingEvent ? 'One decision pending.' : 'No decisions pending.'}`
+  const faults = state.vessels.flatMap((v) => activeFaults(v).map((f) => vesselRepairStatus(state, v, f))).join(' ')
+  return `${faults ? `${faults} ` : ''}${active} mining vessel active. ${docked} docked. ${travelling} in transit or holding. ${state.pendingEvent ? 1 : 0} crew request awaiting attention. ${assigned} repair drones assigned. ${available} available. Processor One has ${state.processingQueue.length} queued loads. ${warnings.join(' ') || 'No major facility warnings.'} ${state.pendingEvent || pendingFaults(state).length ? 'One decision pending.' : 'No decisions pending.'} ${droneStatus(state)}`
 }
 
 export function returnBriefing(state: FacilityState, since: number, now: number): string {
   const elapsed = Number.isFinite(since) ? Math.max(0, now - since) : 0
   if (elapsed < 60_000) return `Captain terminal connected. ${operationalStatus(state)}`
-  const entries = state.operations.filter((event) => event.timestamp > since && event.resolution !== 'pending')
-  const priority = (event: OperationalEvent) => event.category === 'safety' || (event.actionRequested && event.resolution === 'autonomous') ? 0 : event.category === 'maintenance' ? 1 : 2
+  const recent = state.operations.filter((event) => event.timestamp > since && event.resolution !== 'pending')
+  // Summarize each repair once; the full transit/service sequence belongs in history.
+  const completedFaults = new Set(recent.filter((e) => e.operationCode === 245 && e.repair).map((e) => e.repair!.faultId))
+  const entries = recent.filter((event, index) => !event.repair || (completedFaults.has(event.repair.faultId)
+    ? event.operationCode === 245
+    : !recent.slice(index + 1).some((later) => later.repair?.faultId === event.repair!.faultId)))
+  const priority = (event: OperationalEvent) => event.operationCode === 245 || event.operationCode === 390 ? -1 : event.category === 'safety' || (event.actionRequested && event.resolution === 'autonomous') ? 0 : event.category === 'maintenance' ? 1 : 2
   const selected = [...entries].sort((a, b) => priority(a) - priority(b) || b.timestamp - a.timestamp).slice(0, 4).sort((a, b) => a.timestamp - b.timestamp)
   const minutes = Math.floor(elapsed / 60_000)
   const duration = minutes >= 60 ? `${Math.floor(minutes / 60)} hours and ${minutes % 60} minutes` : `${minutes} minutes`
-  return `Captain terminal connected. Elapsed since last connection: ${duration}. ${elapsed > MAX_CATCHUP_MS ? 'Catch-up is limited to seven days of operations. ' : ''}${selected.length ? `During your absence: ${selected.map((event) => event.summary).join(' ')}` : 'No significant operational changes during your absence.'} ${state.pendingEvent ? 'One request is awaiting your preference.' : 'No intervention is required.'} Press 0 for current status. Operational history is available in the terminal.`
+  return `Captain terminal connected. Elapsed since last connection: ${duration}. ${elapsed > MAX_CATCHUP_MS ? 'Catch-up is limited to seven days of operations. ' : ''}${selected.length ? `During your absence: ${selected.map((event) => event.summary).join(' ')}` : 'No significant operational changes during your absence.'} ${state.pendingEvent || pendingFaults(state).length ? 'A request is awaiting your preference; the crew can resolve it safely.' : 'No intervention is required.'} Press 0 for current status. Operational history is available in the terminal.`
 }
 
 function dispatchRoutineService(state: FacilityState, at: number): void {
-  for (const vessel of state.vessels.filter((v) => v.condition === 'service-required' && v.dockingState === 'docked')) {
+  for (const vessel of state.vessels.filter((v) => v.routineServiceDue && v.dockingState === 'docked' && activeFaults(v).length === 0)) {
     if (state.repairDrones.some((d) => d.targetId === vessel.id)) continue
-    const drone = state.repairDrones.find((d) => d.targetId === null)
+    const drone = state.repairDrones.find((d) => d.targetId === null && d.state === 'available' && !d.maintenanceDue)
     if (!drone) continue
     drone.targetId = vessel.id
+    drone.state = 'servicing'
+    drone.location = vessel.name
+    drone.serviceStartedAt = at
     drone.completesAt = at + SERVICE_MS
-    routine(state, at, 'facility', 'maintenance', `${drone.id.toUpperCase()} assigned to routine service on ${vessel.name}.`, [drone.id, vessel.id], 'Scheduled service protects equipment before the next run.')
+    routine(state, at, 'facility', 'maintenance', `${drone.id.toUpperCase()} assigned to routine service on ${vessel.name}.`, [drone.id, vessel.id], 'Scheduled service protects equipment before the next run.', 220)
   }
 }
 

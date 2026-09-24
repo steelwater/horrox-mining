@@ -8,6 +8,7 @@ The player is the captain of a small orbital mining facility. Sound is the prima
 
 - [Crew Brief v0.1](https://docs.google.com/document/d/17gsrWFUz87kP_HKOsciiEYQc0mBk24D_Pd-vLmqCP6U)
 - [Milestone 2 Crew Brief — The Living Mine](https://docs.google.com/document/d/1z4XdfSmxUQitOvMrb87Cztb1MBMKvapDhYRaKurQIhI/edit)
+- [Milestone 3 Crew Brief — Vessel Damage & Repair Operations](https://docs.google.com/document/d/1FeslP44gUyMT6Rk0nI0QaKhoXf1aUw3YDUmOhBSINgU/edit)
 - Product owner and final decision-maker: Dan
 
 The Google Drive brief is the canonical source for product scope, acceptance criteria, and deferred work.
@@ -71,6 +72,12 @@ The mine persists vessels, miners, assignments, cargo, processing, routine drone
 **Screen-off simulation is supported through deterministic catch-up. Continuous live audio while the phone is locked is deferred.** Hiding the app suspends foreground ticking and chatter scheduling, saves the operation, and catches up on resume. This PR adds no native background-audio service or promise of locked-screen speech. Dedicated native lifecycle/audio work and hardware verification belong to a later milestone.
 
 See [implementation, migration, verification, and limitations](docs/milestone-2.md). Native listening and device lifecycle checks remain pending before acceptance.
+
+## Milestone 3 — Vessel Damage & Repair Operations
+
+Named vessel faults, persistent conditions, remote and dockside repairs, reserved repair-drone assignments, safe five-minute autonomy, and structured service history now share the existing simulation clock. Mining, Docking, Emergency, Facility, and Repeat / Status expose the repair choices without a new top-level menu. Save schema 4 preserves existing progress; the Mining Facility AI voice configuration remains unchanged.
+
+See [implementation, codes, playtest fixture, migration, and verification](docs/milestone-3.md). Dan reported playtesting complete on 24 September 2026 and authorized Uplink. Detailed verification and remaining agent-unverified device checks are recorded in the milestone notes.
 
 ## Continuous integration
 
