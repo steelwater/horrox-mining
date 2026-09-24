@@ -140,6 +140,29 @@ Frequently visiting transports may acquire informal crew nicknames while retaini
 
 Visiting transports can require dockside help with docking collars, maneuvering thrusters, coolant, electrical systems, sensors, cargo hardware, hull inspection, or other routine spacecraft maintenance. Repair drones and Cargo Mechs can assist when appropriate.
 
+### Operations Handbook and safety record
+
+The facility maintains a formal **1st Horrox Mining Ltd. Operations Handbook** covering practical procedure for mining approaches, docking, EVA, repair work, Cargo Mech exclusion zones, Hydronium processing and storage, emergency response, shift handover, and other routine operations.
+
+Handbook sections have stable references so they can appear naturally in comms. Fran is the most precise user of the Handbook: when a rule is relevant, the AI may cite the section and immediately explain the practical requirement in plain language. Crew can paraphrase, misremember, dispute, or jokingly invoke sections, but communications should never become constant manual recitation.
+
+The facility also keeps an old-industry-style safety display based on **consecutive station-days without a recordable safety accident**. The exact display can be physical, electronic, or both, but it is part of the workplace rather than a game achievement.
+
+The Handbook distinguishes between:
+
+- a **recordable safety accident**, which resets the counter
+- a **minor first-aid event**, which is logged but normally does not reset it
+- an **equipment-only incident**, which is logged separately
+- a **near-miss**, which is recorded for safety review but does not reset the counter
+
+The counter advances in station-days, persists across saves and absences, and becomes part of facility history. Store the current streak, the best historical streak, and the incident that last reset it. Crew may care about round numbers such as 100 or 365 days, but the simulation must never manufacture an accident simply because a milestone is approaching.
+
+Fran's announcements remain characteristically technical. A suitable example is:
+
+> “Facility safety record: three hundred sixty-four consecutive station-days without a recordable accident.”
+
+Crew reactions can be much less formal, especially when the counter is close to a milestone or after somebody insists that an embarrassing event was “technically a near-miss.” Injuries themselves are not punchlines; the humor comes from workplace ritual, bureaucracy, superstition, and Fran's exact classifications.
+
 ### Crew life and the Cantina
 
 The facility includes a shared off-shift recreation space known simply as **the Cantina**.
