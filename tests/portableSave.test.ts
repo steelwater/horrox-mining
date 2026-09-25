@@ -57,12 +57,13 @@ describe('portable save contract', () => {
     }
   })
 
-  it('migrates a complete schema 3 envelope using the normal migration path', () => {
+  it('imports the historical schema 3 drone shape and migrates to the current state', () => {
     const envelope = JSON.parse(exportSave(createInitialState(start), start))
     envelope.schemaVersion = envelope.state.version = 3
     delete envelope.state.repairJobs; delete envelope.state.nextRepairId
     for (const vessel of envelope.state.vessels) for (const key of ['activeFaults', 'serviceHistory', 'operatingRuns', 'lastFaultRun', 'routineServiceDue', 'resumeAfterRepair']) delete vessel[key]
-    for (const drone of envelope.state.repairDrones) for (const key of ['state', 'location', 'assignedJobId', 'transitStartedAt', 'serviceStartedAt', 'maintenanceDue', 'serviceHistory']) delete drone[key]
+    // Schema 3 (baa962f) predates drone names and repair-assignment metadata.
+    envelope.state.repairDrones = [{ id: 'dr-01', targetId: null, completesAt: null }]
     expect(parseSave(JSON.stringify(envelope), start)).toEqual(createInitialState(start))
   })
 

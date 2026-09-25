@@ -84,7 +84,7 @@ export function parseSave(text: string, now = Date.now()): FacilityState {
   if (raw.version === 3) {
     delete template.repairJobs; delete template.nextRepairId
     for (const vessel of template.vessels as RecordValue[]) for (const key of ['routineServiceDue', 'activeFaults', 'serviceHistory', 'operatingRuns', 'lastFaultRun', 'resumeAfterRepair']) delete vessel[key]
-    for (const drone of template.repairDrones as RecordValue[]) for (const key of ['state', 'location', 'assignedJobId', 'transitStartedAt', 'serviceStartedAt', 'maintenanceDue', 'serviceHistory']) delete drone[key]
+    for (const drone of template.repairDrones as RecordValue[]) for (const key of ['name', 'state', 'location', 'assignedJobId', 'transitStartedAt', 'serviceStartedAt', 'maintenanceDue', 'serviceHistory']) delete drone[key]
   }
   checkShape(raw, template, 'state')
   if (raw.operationStart !== template.operationStart) invalid('state.operationStart')
