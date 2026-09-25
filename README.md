@@ -211,7 +211,13 @@ See [implementation, codes, playtest instructions, save contract, and verificati
 
 ## Continuous integration
 
-GitHub Actions runs `npm ci`, `npm test`, `npm run typecheck`, and `npm run build` on Node 24 for pull requests and pushes to `main`. The **Tests, Typecheck, Build** check is web-only; native builds and branch protection remain separate follow-ups.
+GitHub Actions runs `npm ci`, `npm test`, `npm run typecheck`, and `npm run build` on Node 24 for pull requests and pushes to `main`. After **Tests, Typecheck, Build** passes, **Android Debug APK** builds the checked-out code with Java 21, the committed Gradle wrapper and the hosted Ubuntu 24.04 Android SDK. It rebuilds web assets, syncs only Android, and runs `assembleDebug`. Merging a PR triggers this workflow through the push to `main`; PR runs verify the proposed merge before approval.
+
+To download a testing APK: open **Actions → CI → the successful run for the desired commit → Artifacts → `horrox-mining-debug-<commit>`**. Extract the ZIP to obtain `horrox-mining-debug.apk`, `SHA256SUMS`, and `build-info.txt` (source commit and run URL). PR artifacts identify the tested merge commit; post-merge artifacts identify the actual `main` commit. Artifacts expire after 14 days and are testing conveniences, not approved release archives. Missing APK output or failed web/native checks fails the workflow; no artifact is published from a failed build.
+
+These APKs use the runner's generated debug signing key. A different run or local build may have a different signature, so Android may refuse an in-place update. **Export your save before uninstalling an existing build** and import it after installation; uninstalling removes local app data. Stable signing, store releases, GitHub Releases, deployment and native version changes remain separate decisions. No signing secret is added. Existing branch-protection availability is unchanged.
+
+CI configuration verification follows Google's official [Android testing/setup guidance](https://github.com/android/skills/blob/main/testing/testing-setup/SKILL.md): retain the existing Vitest/native shell setup and verify the actual Gradle build and produced APK. No new device-test framework or runtime dependency is introduced. The pipeline does not install or playtest the APK on a device.
 
 ## Development
 
