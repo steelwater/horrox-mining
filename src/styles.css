@@ -131,3 +131,13 @@ footer { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-betwee
 }
 
 .transcript time { display: block; color: #8eb798; font-size: 0.65rem; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+
+.menu-panel { display: grid; max-width: calc(100vw - 40px); }
+.menu-panel button { text-align: left; min-height: 44px; }
+.save-tools, .utility-message { grid-column: 1 / -1; font-size: 0.78rem; line-height: 1.5; overflow-wrap: anywhere; }
+.save-tools { margin: 16px 0; padding: 14px; border: 1px solid #315b3d; }
+.save-tools label { display: block; margin-bottom: 8px; }
+.save-tools textarea { width: 100%; height: 240px; resize: vertical; overflow: auto; font: inherit; color: #d6f7dc; background: #06140b; border: 1px solid #3d7350; padding: 10px; }
+.save-tools textarea:focus-visible { outline: 2px solid #e1ff8c; }
+.build-label { width: 100%; color: #a6cbb0; font-size: 0.65rem; padding-top: 6px; }
+button:disabled { opacity: 0.5; cursor: wait; }

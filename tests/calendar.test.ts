@@ -59,6 +59,7 @@ describe('Horrox operation calendar', () => {
 
   it('does not pause a completed operation when a commissioning field is missing', () => {
     const state = migrateFacility({ version: 3, lastProcessedAt: start, onboardingStatus: 'complete', facilityAgeMs: day }, start)
+    state.nextRepairId = 2 // Established operation: early sensor service already encountered.
     expect(state.commissioned).toBe(true)
     advanceFacility(state, start + 20 * 60_000)
     expect(state.oreProcessed).toBe(12)

@@ -2,10 +2,15 @@
 import { computed, ref } from 'vue'
 import { formatOperationTime, operationDate } from './game/calendar'
 import { useFacility } from './composables/useFacility'
+import { buildLabel } from './game/build'
+import { formatTranscript, parseSave } from './game/portableSave'
 import type { KeypadKey } from './game/types'
 
 const booting = ref(true)
 const {
+  importing,
+  portableSnapshot,
+  importSnapshot,
   startAudio,
   state,
   ready,
@@ -26,6 +31,49 @@ const keys: KeypadKey[] = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0'
 const latestTranscript = computed(() => [...state.transcript].reverse())
 const menuOpen = ref(false)
 const textDisplayVisible = ref(true)
+
+const utility = ref<'export' | 'import' | null>(null)
+const saveText = ref('')
+const validatedText = ref<string | null>(null)
+const utilityMessage = ref('')
+
+function openUtility(mode: 'export' | 'import'): void {
+  utility.value = mode
+  saveText.value = mode === 'export' ? portableSnapshot() : ''
+  validatedText.value = null
+  utilityMessage.value = ''
+  menuOpen.value = false
+}
+async function copyText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+    utilityMessage.value = 'Copied to clipboard.'
+  } catch {
+    utilityMessage.value = 'Clipboard unavailable. Your operation is unchanged. Export text can also be selected and copied manually.'
+  }
+}
+function validateImport(): void {
+  try {
+    parseSave(saveText.value)
+    validatedText.value = saveText.value
+    utilityMessage.value = 'Valid save. Import will replace your current operation, including its progress and history. Continue?'
+  } catch (error) {
+    validatedText.value = null
+    utilityMessage.value = error instanceof Error ? error.message : 'Save validation failed.'
+  }
+}
+async function confirmImport(): Promise<void> {
+  if (validatedText.value === null || validatedText.value !== saveText.value) return
+  try {
+    await importSnapshot(validatedText.value)
+    utility.value = null
+    validatedText.value = null
+    saveText.value = ''
+    utilityMessage.value = 'Save imported. Operation restored.'
+  } catch (error) {
+    utilityMessage.value = error instanceof Error ? error.message : 'Import failed. Current session retained.'
+  }
+}
 
 void startAudio()
 
@@ -74,7 +122,7 @@ window.setTimeout(() => {
           <button
             class="menu-trigger"
             type="button"
-            aria-label="Terminal display options"
+            aria-label="Terminal options"
             aria-controls="terminal-display-menu"
             :aria-expanded="menuOpen"
             @click="menuOpen = !menuOpen"
@@ -85,9 +133,25 @@ window.setTimeout(() => {
             <button type="button" @click="toggleTextDisplay">
               {{ textDisplayVisible ? 'HIDE TEXT DISPLAY' : 'SHOW TEXT DISPLAY' }}
             </button>
+            <button type="button" @click="copyText(formatTranscript(state.transcript)); menuOpen = false">COPY TRANSCRIPT</button>
+            <button type="button" @click="openUtility('export')">EXPORT SAVE</button>
+            <button type="button" @click="openUtility('import')">IMPORT SAVE</button>
           </div>
         </div>
       </header>
+
+      <p v-if="utilityMessage" class="utility-message" role="status">{{ utilityMessage }}</p>
+      <section v-if="utility" class="save-tools" :aria-label="utility === 'export' ? 'Export save' : 'Import save'" @keydown.stop>
+        <label for="save-json">{{ utility === 'export' ? 'COPYABLE SAVE JSON' : 'PASTE SAVE JSON' }}</label>
+        <textarea id="save-json" v-model="saveText" :readonly="utility === 'export'" :disabled="importing"
+          spellcheck="false" @input="validatedText = null; utilityMessage = ''"></textarea>
+        <div class="terminal-actions">
+          <button v-if="utility === 'export'" @click="copyText(saveText)">COPY</button>
+          <button v-else-if="validatedText === null" @click="validateImport">VALIDATE IMPORT</button>
+          <button v-else :disabled="importing" @click="confirmImport">{{ importing ? 'IMPORTING…' : 'CONFIRM REPLACE OPERATION' }}</button>
+          <button :disabled="importing" @click="utility = null; validatedText = null; saveText = ''; utilityMessage = ''">CANCEL</button>
+        </div>
+      </section>
 
       <p v-if="storageError" role="alert">{{ storageError }}</p>
 
@@ -113,6 +177,7 @@ window.setTimeout(() => {
         <button
           v-for="key in keys"
           :key="key"
+          :disabled="importing"
           class="key"
           :aria-label="key === '*' ? 'Back or cancel' : key === '#' ? 'Confirm or enter' : `Key ${key}`"
           @click="pressKey(key)"
@@ -156,6 +221,7 @@ window.setTimeout(() => {
       <footer>
         <span>TOUCH // KEYBOARD // BLUETOOTH NUMPAD</span>
         <span>ORE {{ state.oreProcessed }}T</span>
+        <span class="build-label">{{ buildLabel }}</span>
       </footer>
     </section>
 

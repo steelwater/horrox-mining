@@ -2,7 +2,10 @@ import { voiceProfiles } from '../game/content'
 import type { AudioPriority, ChatterLine, VoiceProfile } from '../game/types'
 import { canUseNativeSpeech, speakNatively, stopNativeSpeech } from './nativeSpeech'
 
+export type SpeechContext = { kind: 'request' | 'response'; cause: string }
+
 type SpeechRequest = {
+  context?: SpeechContext
   text: string
   profileId: string
   priority: AudioPriority
@@ -70,8 +73,8 @@ export class AudioDirector {
     oscillator.stop(this.context.currentTime + 0.08)
   }
 
-  speak(text: string, profileId = 'terminal', priority: AudioPriority = 3): void {
-    this.enqueue({ text, profileId, priority })
+  speak(text: string, profileId = 'terminal', priority: AudioPriority = 3, context?: SpeechContext): void {
+    this.enqueue({ text, profileId, priority, context })
   }
 
   speakExchange(lines: ChatterLine[], onLine: (line: ChatterLine) => void): boolean {
@@ -97,8 +100,10 @@ export class AudioDirector {
     const nativeSpeech = canUseNativeSpeech()
 
     if (priority < 5 && this.exchangeTimer !== null) this.cancelChatter()
-    if (this.speaking && this.currentPriority !== null && priority < this.currentPriority) {
+    if (this.speaking && this.currentPriority !== null && priority === 1 && this.currentPriority !== 1) {
       this.queue.unshift(request)
+      // Preserve interrupted operational context so its answer cannot become orphaned.
+      if (this.currentRequest?.context) this.queue.push(this.currentRequest)
       this.currentRequest = null
       this.playbackId += 1
       this.speaking = false
@@ -113,7 +118,6 @@ export class AudioDirector {
       }
     } else {
       this.queue.push(request)
-      this.queue.sort((a, b) => a.priority - b.priority)
     }
     this.playNext()
   }
@@ -132,7 +136,10 @@ export class AudioDirector {
 
   private playNext(): void {
     if (this.speaking || this.stopping || this.exchangeTimer !== null) return
-    const request = this.queue.shift()
+    const rank = (request: SpeechRequest) => request.priority === 1 ? 0 : request.context ? 1 : request.priority + 1
+    this.queue.sort((a, b) => rank(a) - rank(b))
+    const index = this.queue.findIndex((candidate) => candidate.priority === 1 || candidate.context?.kind !== 'response' || !this.queue.some((prior) => prior.context?.kind === 'request' && prior.context.cause === candidate.context?.cause))
+    const request = this.queue.splice(Math.max(0, index), 1)[0]
     if (!request) return
 
     this.currentRequest = request
