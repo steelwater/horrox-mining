@@ -74,7 +74,7 @@ jobs:
           printf 'commit=%s\nrun=%s/%s/actions/runs/%s\nvariant=debug\n' \
             "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > build-info.txt
       - name: Upload debug APK
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: horrox-mining-debug-${{ github.sha }}
           path: ${{ runner.temp }}/apk/
