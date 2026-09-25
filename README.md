@@ -203,7 +203,11 @@ See [implementation, migration, verification, and limitations](docs/milestone-2.
 
 Named vessel faults, persistent conditions, remote and dockside repairs, reserved repair-drone assignments, safe five-minute autonomy, and structured service history now share the existing simulation clock. Mining, Docking, Emergency, Facility, and Repeat / Status expose the repair choices without a new top-level menu. Save schema 4 preserves existing progress; the Mining Facility AI voice configuration remains unchanged.
 
-See [implementation, codes, playtest fixture, migration, and verification](docs/milestone-3.md). Dan reported playtesting complete on 24 September 2026 and authorized Uplink. Detailed verification and remaining agent-unverified device checks are recorded in the milestone notes.
+The core PR is merged. The [Milestone 3 follow-up brief](https://docs.google.com/document/d/1EX_KnELwg7UkkG1D3HPb68h12kcnEMgBmG3oamHAxHg/edit) reopens acceptance for speech chronology, normal-operation repair activity, and copy/paste tools. This follow-up queues answers behind their requests, introduces a real early sensor-service interaction, and adds **Copy Transcript**, **Export Save**, and **Import Save** under the secondary terminal menu. Import validates before an explicit replacement confirmation and rolls back failed storage/reinitialization.
+
+`package.json` maintains the app `version` and `milestone`; `src/game/build.ts` derives the footer label and export/transcript metadata. The current label is V0.1.0 / MILESTONE 3; no release version was chosen. Portable JSON wraps the complete persistent state with format/schema/build/export-time metadata. It supports complete schema 3 and 4 envelopes, migrates schema 3 through the existing loader, and rejects unsupported versions or invalid state. Existing installed schema 1–3 saves still migrate normally; export them from the current app to obtain a portable schema 4 envelope.
+
+See [implementation, codes, playtest instructions, save contract, and verification](docs/milestone-3.md). Milestone 3 remains open until Dan playtests and accepts this follow-up.
 
 ## Continuous integration
 

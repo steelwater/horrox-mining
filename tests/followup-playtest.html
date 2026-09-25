@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Horrox causal speech playtest</title>
+<style>body{max-width:760px;margin:32px auto;padding:16px;font:16px/1.6 monospace;background:#06140b;color:#d6f7dc}button{font:inherit;margin:8px;padding:12px}li{margin-bottom:10px}</style></head>
+<body>
+<h1>Causal speech playtest</h1>
+<p>Development-only, isolated in-memory operation. The real audio director uses a controllable speech adapter so each completion can be inspected. This does not verify audible device TTS.</p>
+<p>Start an ordinary message, immediately request docking and approve it, then finish each spoken line. Expect ordinary → incoming docking request → decision. The docking state changes immediately. Safety can interrupt.</p>
+<button id="start">Start ordinary message</button><button id="request">Request docking and decide immediately</button><button id="finish">Finish current speech</button><button id="safety">Safety report</button>
+<p id="state">Docking state: holding</p><ol id="trace"></ol>
+<script type="module">
+import { AudioDirector } from '/src/audio/audioDirector.ts'
+import { createInitialState, commissionFacility, beginRequest, applyPendingDecision, findEvent } from '/src/game/engine.ts'
+let current
+Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: {
+  speak(utterance) { current = utterance; const li = document.createElement('li'); li.textContent = utterance.text; document.querySelector('#trace').append(li) },
+  cancel() { current = null }, getVoices() { return [] },
+} })
+const audio = new AudioDirector()
+const state = createInitialState(Date.now())
+commissionFacility(state, Date.now())
+document.querySelector('#start').onclick = () => audio.speak('Ordinary message already playing.', 'terminal', 3)
+document.querySelector('#request').onclick = () => {
+  const now = Date.now()
+  if (!beginRequest(state, 'docking-hauler-two', now)) return
+  const event = findEvent('docking-hauler-two')
+  const cause = `${event.id}:${now}`
+  audio.speak(event.spokenLines.join(' '), 'steady', event.priority, { kind: 'request', cause })
+  const decision = applyPendingDecision(state, '1', now)
+  audio.speak(decision, 'terminal', 2, { kind: 'response', cause })
+  document.querySelector('#state').textContent = `Docking state: ${state.vessels[1].dockingState}; pending request: ${state.pendingEvent === null ? 'resolved' : 'open'}`
+}
+document.querySelector('#finish').onclick = () => { const utterance = current; current = null; utterance?.onend?.() }
+document.querySelector('#safety').onclick = () => audio.speak('Safety report. Berth isolated; crew are safe.', 'terminal', 1)
+</script>
+</body></html>

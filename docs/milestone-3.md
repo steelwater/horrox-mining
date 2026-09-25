@@ -77,3 +77,61 @@ Re-ran all 83 Vitest tests, TypeScript checking, and the production web build su
 Reviewed Google's official [testing/testing-setup skill](https://github.com/android/skills/blob/main/testing/testing-setup/SKILL.md), using its current-test-inventory analysis. The app is a Vue/Capacitor WebView shell; Android declares JUnit4 and AndroidX/Espresso with generated example tests. Milestone 3 business logic is covered by Vitest, and no native Android source or configuration changed. Native DI, Compose, screenshot-framework installation, R8, Play, profiling, and edge-to-edge skills are not applicable to this Uplink scope. No new testing dependencies or persistent skill configuration were added. Instrumented/native screenshot checks were not run; earlier browser checks and Dan's playtest remain the experience evidence.
 
 GitHub's branch-protection endpoint reports HTTP 403: this private repository requires GitHub Pro or public visibility to enable the feature. No subscription, visibility, or protection change was made. CI is still followed through completion as the review gate.
+
+## Milestone 3 follow-up — 25 September 2026
+
+Authority: [Playtest Fixes & Save Tools Crew Brief](https://docs.google.com/document/d/1EX_KnELwg7UkkG1D3HPb68h12kcnEMgBmG3oamHAxHg/edit), governed by the [Immersion Milestone Plan](https://docs.google.com/document/d/1UIqXtDuXe7g4oSaI44l9ETkWiT705KV050qhLDV4n5A/edit). Owner: Dan. Branch: `feat/milestone-3-followup`, based on latest merged `main` at `6b1dfb9`. The earlier core-Milestone-3 acceptance does not close this follow-up. Dan's playtest and acceptance remain required.
+
+### Behavior
+
+Speech carries request/response cause identifiers. Valid decisions still update state immediately. Non-safety speech finishes its current line, then operational traffic plays in causal order ahead of ordinary reports/chatter. Safety reports still interrupt immediately; interrupted operational context is retained so later answers remain understandable. Vessel support, repeat/next-fault menus, and repair progress share this ordering. Voice profiles, native provider, rate, pitch, identity, and other voice parameters are unchanged.
+
+A first sensor-degradation report now occurs two minutes into active extraction when the operation has no previous repair record (`nextRepairId === 1`). It is a real persisted fault: reduced extraction, five-minute response deadline, drone reservation/transit/service, and recovery history. An established operation with no prior repairs encounters it on its active extraction run; an operation with previous repairs retains its existing cadence. The persistent repair counter prevents replay after reload or readiness review. Subsequent wear remains every twelve runs beginning at run thirteen. A captain dispatching support promptly can finish service within ten minutes; unattended play requests support at minute seven and begins service just after minute nine, finishing just after minute thirteen. No response timeout or service duration was shortened.
+
+Foreground repair transitions are announced in event order instead of selecting only one report from a tick. Ambient exchanges have 90-second opportunities and a five-minute per-exchange cooldown, restored from retained transcript entries after reconnect/import. Open operational decisions suppress ambient chatter. There are no canned repair lines detached from simulation state.
+
+The secondary terminal menu provides Copy Transcript, Export Save, and Import Save. The keypad map is unchanged. JSON textareas support ordinary typing, selection and copy/paste without routing those keystrokes into operational commands. Copy feedback is visual. Clipboard failure reports an error; export remains selectable for manual copy. Export text is read-only; import text is editable. Editing validated text invalidates confirmation. Replacement requires a separate **CONFIRM REPLACE OPERATION** action.
+
+### Build and portable-save contract
+
+`package.json` is the maintained source for `version` and `milestone`; `src/game/build.ts` derives the shared metadata and label. Current web build identity: **V0.1.0 / MILESTONE 3**. This does not create a release/tag or change native store versions. The footer is secondary, visible in standard/dim modes, and hidden with the terminal in black mode.
+
+The JSON envelope contains:
+
+- `format`: `horrox-mining-portable-save`;
+- `schemaVersion`: independent persistent model version, currently 4;
+- `appVersion` and `milestone`: from the shared build source;
+- `exportedAt`: ISO timestamp;
+- `state`: the complete persistent `FacilityState`, including commissioning, station age, crew, vessels/cargo/assignments, faults, repair jobs/drones, requests, processing, history/transcript and autopilot preference.
+
+No audio handles, timers, browser/native objects, downloads, file pickers, share sheets, cloud services or dependencies are added. Display mode and utility UI state remain session-local, as before.
+
+Portable import accepts complete schema 3 or 4 envelopes. Schema 3 uses normal migration to schema 4. Schema 1/2 installation saves continue to load through existing tolerant migration; open those in the current app and export the migrated operation before moving it. Portable input is deliberately stricter than installation recovery: malformed JSON, wrong format, missing state/required nested fields, bad values/references, duplicate/missing fixed entities, and future schemas fail before storage mutation. A save ahead of the device clock is rejected with a clock-correction message. Current-schema normalization must preserve the supplied state rather than silently dropping/correcting fields. History remains bounded by the existing persistence limits.
+
+After explicit confirmation, replacement joins the existing serialized Preferences write queue. Autosaves and input pause for the transaction. The exact previous saved bytes are retained, the imported state is written/read through normal persistence, elapsed time is caught up using the normal simulation, and the restored state is saved. The live operation changes only after success. Failure restores the prior stored bytes and keeps the current live session; if storage also refuses rollback, the UI tells the player to retain the session and retry saving. There is no extra user-managed backup file. Elapsed real time during transfer is intentionally included, matching ordinary reconnect behavior.
+
+Future persistent changes must update schema/validation/migration and round-trip tests together. Export must remain a complete restorable operation, and validation must remain separate from mutation.
+
+### Verification and Captain playtest
+
+Final local checks: all **108 tests pass**; `npm run typecheck`, `npm run build` (also run through `npm run cap:sync`), and Capacitor Android/iOS asset sync pass. Android debug assembly passes using the established Android Studio JDK; existing flatDir warnings remain. No APK was installed or published.
+
+Automated coverage includes causal queue order and immediate decision application, safety interruption/replay, normal early service and conservative later cadence, ambient cooldown, version metadata, chronological transcript formatting, complete repair-phase round trips, schema 3 migration, malformed/missing/invalid/future input, and rollback after read/write failure. Existing production-deadline fixtures explicitly represent an operation that has already encountered its first service interaction; dedicated fresh-operation tests cover the new cadence.
+
+Browser checks use an isolated local test origin. Observed: normal sensor fault at two minutes; five-minute autonomous response, drone dispatch and service underway within the ten-minute session (including ordinary reconnects during development); text copy with version/station timestamps; export → Copy → system paste → validate → explicit confirmation → restored active fault; malformed text rejected without replacement; physical number input after a touchscreen command. Phone (390px) and tablet (800px) layouts were inspected, including long JSON and error feedback, without horizontal overflow.
+
+The original queue sequence was also manually reproduced at `/tests/followup-playtest.html`: docking changed to approaching while only the ordinary line had started; completing that line started the incoming request; completing the request started confirmation; safety interrupted immediately. This development-only page uses the real audio director and an in-memory engine with a controlled speech adapter. It verifies causal playback calls, not audible hardware TTS.
+
+Captain playtest:
+
+1. On a fresh operation, delegate commissioning and listen for the sensor fault at roughly two minutes. Press 3, then 1 for diagnostics and 2 for drone support, or wait for the five-minute autonomous choice. Listen through transit, service and completion.
+2. While a normal report is speaking, open a request and immediately choose an answer. State should change immediately; the request must be heard before confirmation. Check genuine safety interruption separately.
+3. Open the terminal menu, Copy Transcript, and paste into a text editor. Verify chronological station timestamps and build header.
+4. Export Save, Copy, then Import Save and paste. Validate, inspect the replacement warning, then confirm. Check state/history and normal elapsed-time catch-up. Try malformed text and Cancel as separate cases.
+5. Check standard/dim/black display, phone/tablet readability, and native clipboard/TTS/physical Bluetooth input on the intended device.
+
+Google's official [testing/testing-setup skill](https://github.com/android/skills/blob/main/testing/testing-setup/SKILL.md) informed the test inventory: this is a Vue/Capacitor WebView app with Vitest behavior coverage and existing JUnit4/AndroidX/Espresso shell dependencies. Native source/configuration is unchanged. DI/Compose, R8, Play, profiling, and new screenshot frameworks are outside this follow-up; none was installed.
+
+Physical device listening/clipboard, Bluetooth, iOS build/runtime, and device termination/background behavior were not verified by the agent. Continuous locked-screen speech remains deferred. GitHub protection configuration still returns HTTP 403 on this private repository's current plan; no visibility/subscription/protection change is made. The configured Web CI result on the latest PR commit is the remote handoff gate. No lint script exists.
+
+Rollback remains the isolated feature branch at base `6b1dfb9`; no merge, release, deployment, save reset, or cleanup is authorized. Schema 4 is unchanged. Preserve a portable export before testing a different build against an existing installation. Next: Dan reviews and playtests the follow-up PR after CI completes.
