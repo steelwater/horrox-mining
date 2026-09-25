@@ -1,7 +1,7 @@
 import { readRepairRecord, restoreRepairs } from './repairPersistence'
 import { operationAgeAt } from './calendar'
 import { Preferences } from '@capacitor/preferences'
-import { commissionFacility, createInitialState, findEvent, MAX_CATCHUP_MS } from './engine'
+import { commissionFacility, createInitialState, findEvent, restoreState, MAX_CATCHUP_MS } from './engine'
 import { onboardingSteps } from './onboarding'
 import type { FacilityState } from './types'
 
@@ -126,4 +126,29 @@ export function saveFacility(state: FacilityState): Promise<void> {
   const value = JSON.stringify(state)
   writes = writes.catch(() => undefined).then(() => Preferences.set({ key: SAVE_KEY, value }))
   return writes
+}
+
+/** Serialize replacement with autosaves and restore the exact prior bytes on failure. */
+export function replaceFacility(imported: FacilityState, now: number): Promise<FacilityState> {
+  const transaction = writes.catch(() => undefined).then(async () => {
+    const previous = await Preferences.get({ key: SAVE_KEY })
+    try {
+      await Preferences.set({ key: SAVE_KEY, value: JSON.stringify(imported) })
+      const loaded = await loadFacility()
+      if (!loaded) throw new Error('Imported save could not be read back.')
+      const restored = restoreState(loaded, now).state
+      await Preferences.set({ key: SAVE_KEY, value: JSON.stringify(restored) })
+      return restored
+    } catch (error) {
+      try {
+        if (previous.value === null) await Preferences.remove({ key: SAVE_KEY })
+        else await Preferences.set({ key: SAVE_KEY, value: previous.value })
+      } catch {
+        throw new Error('Import failed and storage recovery is unavailable. Current session is retained; keep it open and retry saving.')
+      }
+      throw error
+    }
+  })
+  writes = transaction.then(() => undefined)
+  return transaction
 }
