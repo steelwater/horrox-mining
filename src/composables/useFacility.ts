@@ -1,7 +1,8 @@
+import { exportSave, parseSave } from '../game/portableSave'
 import { activeFaults, activeJob, decideRepair, droneStatus, pendingFaults, repairMenu, repairOptions, vesselRepairStatus } from '../game/repairs'
 import { operationAgeAt } from '../game/calendar'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { AudioDirector } from '../audio/audioDirector'
+import { AudioDirector, type SpeechContext } from '../audio/audioDirector'
 import { chatter, miners } from '../game/content'
 import {
   advanceFacility,
@@ -18,7 +19,7 @@ import {
   routeKey,
 } from '../game/engine'
 import { advanceOnboarding, onboardingPrompt } from '../game/onboarding'
-import { loadFacility, saveFacility } from '../game/persistence'
+import { loadFacility, saveFacility, replaceFacility } from '../game/persistence'
 import type { AudioPriority, FacilityState, KeypadKey, TranscriptEntry } from '../game/types'
 
 const audio = new AudioDirector()
@@ -26,6 +27,7 @@ const audio = new AudioDirector()
 export function useFacility() {
   const state = reactive<FacilityState>(createInitialState(Date.now()))
   const ready = ref(false)
+  const importing = ref(false)
   const storageError = ref('')
   let suspendedAt: number | null = null
   const displayMode = ref<'standard' | 'dim' | 'black'>('standard')
@@ -54,13 +56,13 @@ export function useFacility() {
     lastMessage.value = text
   }
 
-  function announce(text: string, speaker = 'Facility Control', profileId = 'terminal', priority: AudioPriority = 3): void {
+  function announce(text: string, speaker = 'Facility Control', profileId = 'terminal', priority: AudioPriority = 3, context?: SpeechContext): void {
     recordTranscript(text, speaker, priority)
-    audio.speak(text, profileId, priority)
+    audio.speak(text, profileId, priority, context)
   }
 
   async function persist(): Promise<void> {
-    if (!ready.value) return
+    if (!ready.value || importing.value) return
     state.lastSavedAt = Date.now()
     try {
       await saveFacility({ ...state })
@@ -81,6 +83,7 @@ export function useFacility() {
     if (saved) {
       const restored = restoreState(saved, now)
       Object.assign(state, restored.state)
+      restoreChatterCooldowns()
       announce(returnBriefing(state, saved.lastActiveAt, now), 'Facility Control', 'terminal', 2)
     } else {
       Object.assign(state, createInitialState(now))
@@ -98,7 +101,7 @@ export function useFacility() {
   }
 
   async function pressKey(key: KeypadKey): Promise<void> {
-    if (!ready.value) return
+    if (!ready.value || importing.value) return
     audio.cancelChatter()
     const repairAtInput = pendingFaults(state).map(({ fault }) => fault.id)
     const requestAtInput = state.pendingEvent
@@ -146,11 +149,11 @@ export function useFacility() {
       } else if (key === '#') {
         selected = faults[(faults.indexOf(selected) + 1) % faults.length]!
         supportFaultId.value = selected.fault.id
-        announce(repairMenu(state, selected.vessel, selected.fault))
-      } else if (key === '0') announce(repairMenu(state, selected.vessel, selected.fault))
+        announce(repairMenu(state, selected.vessel, selected.fault), 'Facility Control', 'terminal', 2, { kind: 'request', cause: selected.fault.id })
+      } else if (key === '0') announce(repairMenu(state, selected.vessel, selected.fault), 'Facility Control', 'terminal', 2, { kind: 'request', cause: selected.fault.id })
       else {
         const option = repairOptions(state, selected.vessel, selected.fault)[key]
-        announce(option ? decideRepair(state, selected.vessel, selected.fault, option.action, Date.now()) : 'That response is unavailable. Press 0 for current repair choices.', 'Facility Control', 'terminal', 2)
+        announce(option ? decideRepair(state, selected.vessel, selected.fault, option.action, Date.now()) : 'That response is unavailable. Press 0 for current repair choices.', 'Facility Control', 'terminal', 2, { kind: 'response', cause: selected.fault.id })
       }
       await persist()
       return
@@ -160,7 +163,7 @@ export function useFacility() {
         : key === '4' ? faults.find(({ vessel, fault }) => ['docked', 'approaching', 'returning'].includes(vessel.dockingState) || activeJob(state, fault)?.method === 'dock') : undefined
     if (channelFault) {
       supportFaultId.value = channelFault.fault.id
-      announce(repairMenu(state, channelFault.vessel, channelFault.fault), 'Facility Control', 'terminal', channelFault.fault.emergency ? 1 : 2)
+      announce(repairMenu(state, channelFault.vessel, channelFault.fault), 'Facility Control', 'terminal', 2, { kind: 'request', cause: channelFault.fault.id })
       await persist()
       return
     }
@@ -173,12 +176,13 @@ export function useFacility() {
     if (state.pendingEvent) {
       if (key === '0') {
         const event = findEvent(state.pendingEvent.eventId)!
-        announce(`${event.spokenLines.join(' ')}${faults.length ? ` ${faults.map(({ vessel, fault }) => vesselRepairStatus(state, vessel, fault)).join(' ')}` : ''}`, speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority)
+        announce(`${event.spokenLines.join(' ')}${faults.length ? ` ${faults.map(({ vessel, fault }) => vesselRepairStatus(state, vessel, fault)).join(' ')}` : ''}`, speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority, { kind: 'request', cause: `${event.id}:${state.pendingEvent.requestedAt}` })
         return
       }
+      const cause = `${state.pendingEvent.eventId}:${state.pendingEvent.requestedAt}`
       const message = applyPendingDecision(state, key, Date.now())
       if (message) {
-        announce(message, 'Facility Control', 'terminal', 2)
+        announce(message, 'Facility Control', 'terminal', 2, { kind: 'response', cause })
       } else {
         announce('That response is not available for the current request. Press 1 or 2, or allow the crew to decide.', 'Facility Control')
       }
@@ -210,25 +214,29 @@ export function useFacility() {
       announce('That channel has no new report at this time.', 'Facility Control')
       return
     }
-    announce(event.spokenLines.join(' '), speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority)
+    announce(event.spokenLines.join(' '), speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority, event.immediateSafety ? undefined : { kind: 'request', cause: `${event.id}:${state.pendingEvent!.requestedAt}` })
     if (event.immediateSafety) announce(state.operations.at(-1)!.summary, 'Facility Control', 'terminal', 1)
   }
 
   function tick(): void {
-    if (!ready.value || suspendedAt !== null) return
+    if (!ready.value || importing.value || suspendedAt !== null) return
     const before = state.nextOperationId
     advanceFacility(state, Date.now())
     state.lastActiveAt = Math.max(state.lastActiveAt, Date.now())
     if (state.nextOperationId !== before) {
       const fresh = state.operations.filter((entry) => Number(entry.id.replace('op-', '')) >= before)
-      const latest = fresh.find((entry) => entry.repair && entry.resolution === 'pending') ?? fresh.find((entry) => entry.category === 'safety') ?? state.operations.at(-1)!
-      if (state.onboardingStatus !== 'active') announce(latest.summary, 'Facility Control', 'terminal', 2)
+      if (state.onboardingStatus !== 'active') {
+        // Keep each repair transition in event order, including dispatch and completion.
+        const reports = fresh.some((entry) => entry.repair) ? fresh.filter((entry) => entry.repair || entry.category === 'safety') : fresh.slice(-1)
+        for (const entry of reports) announce(entry.summary, 'Facility Control', 'terminal', entry.category === 'safety' && entry.operationCode !== 390 ? 1 : 2,
+          entry.repair ? { kind: entry.resolution === 'pending' ? 'request' : 'response', cause: entry.repair.faultId } : undefined)
+      }
       void persist()
     }
   }
 
   function onVisibilityChange(): void {
-    if (!ready.value) return
+    if (!ready.value || importing.value) return
     if (document.hidden) {
       tick()
       audio.cancelChatter()
@@ -245,22 +253,34 @@ export function useFacility() {
     }
   }
 
+  const chatterPlayedAt = new Map<string, number>()
+  function restoreChatterCooldowns(): void {
+    chatterPlayedAt.clear()
+    for (const exchange of chatter) {
+      const last = [...state.transcript].reverse().find((entry) => entry.priority === 5 && entry.text === exchange.lines[0]?.text)
+      if (last) chatterPlayedAt.set(exchange.id, last.timestamp)
+    }
+  }
   function emitChatter(): void {
-    if (!ready.value || suspendedAt !== null || state.onboardingStatus === 'active' || state.pendingEvent || pendingFaults(state).length) return
-    const exchange = chatter[Math.floor(Math.random() * chatter.length)]!
-    audio.speakExchange(exchange.lines, (line) => {
+    if (!ready.value || importing.value || suspendedAt !== null || state.onboardingStatus === 'active' || state.pendingEvent || pendingFaults(state).length) return
+    const eligible = chatter.filter((exchange) => Date.now() - (chatterPlayedAt.get(exchange.id) ?? -Infinity) >= 5 * 60_000)
+    if (!eligible.length) return
+    const exchange = eligible[Math.floor(Math.random() * eligible.length)]!
+    const accepted = audio.speakExchange(exchange.lines, (line) => {
       recordTranscript(line.text, line.speaker, 5)
       void persist()
     })
+    if (accepted) chatterPlayedAt.set(exchange.id, Date.now())
   }
 
   function scheduleTimers(): void {
     timers.push(window.setInterval(tick, 1_000))
-    timers.push(window.setInterval(emitChatter, 24_000))
+    timers.push(window.setInterval(emitChatter, 90_000))
     timers.push(window.setInterval(() => { if (suspendedAt === null) { tick(); void persist() } }, 30_000))
   }
 
   function skipOnboarding(): void {
+    if (!ready.value || importing.value) return
     commissionFacility(state, Date.now())
     state.onboardingStatus = 'skipped'
     announce('Commissioning checks delegated to Facility Control. Normal operations authorized. Press 0 for current status, or 9 for autopilot.', 'Facility Control', 'terminal', 2)
@@ -268,6 +288,7 @@ export function useFacility() {
   }
 
   function replayOnboarding(): void {
+    if (!ready.value || importing.value) return
     audio.cancelChatter()
     state.onboardingStatus = 'active'
     state.onboardingStep = 0
@@ -283,7 +304,32 @@ export function useFacility() {
     displayMode.value = 'standard'
   }
 
+  function portableSnapshot(): string {
+    tick()
+    return exportSave(state)
+  }
+
+  async function importSnapshot(text: string): Promise<void> {
+    if (!ready.value || importing.value) throw new Error('Terminal is busy. Please retry.')
+    const imported = parseSave(text)
+    importing.value = true
+    try {
+      const restored = await replaceFacility(imported, Date.now())
+      audio.stop()
+      Object.assign(state, restored)
+      supportFaultId.value = null
+      lastMessage.value = state.transcript.at(-1)?.text ?? ''
+      restoreChatterCooldowns()
+      storageError.value = ''
+    } finally {
+      importing.value = false
+      if (typeof document !== 'undefined' && document.hidden) onVisibilityChange()
+    }
+  }
+
   function onKeydown(event: KeyboardEvent): void {
+    if (event.target instanceof HTMLElement && (event.target.closest('input, textarea, select, [contenteditable=true]')
+      || (event.key === 'Enter' && event.target.closest('button')))) return
     const key = normalizeKeyboardKey(event.key)
     if (!key) return
     event.preventDefault()
@@ -312,6 +358,9 @@ export function useFacility() {
   })
 
   return {
+    importing,
+    portableSnapshot,
+    importSnapshot,
     startAudio: () => audio.startAmbience().catch(console.warn),
     state,
     ready,

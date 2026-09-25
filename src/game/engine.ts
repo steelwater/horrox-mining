@@ -1,4 +1,4 @@
-import { activeFaults, advanceRepairs, detectOperationalWear, droneStatus, miningEfficiency, pendingFaults, repairDeadlines, scheduleRepairs, vesselRepairStatus } from './repairs'
+import { activeFaults, advanceRepairs, detectFault, detectOperationalWear, droneStatus, miningEfficiency, pendingFaults, repairDeadlines, scheduleRepairs, vesselRepairStatus } from './repairs'
 import { OPERATION_START, operationAgeAt } from './calendar'
 import { events, miners } from './content'
 import type { EventDefinition, FacilityState, KeypadKey, PendingEvent, OperationalEvent } from './types'
@@ -249,12 +249,18 @@ export function advanceFacility(state: FacilityState, now: number): void {
   while (true) {
     const pendingAt = state.pendingEvent
       ? state.pendingEvent.requestedAt + (findEvent(state.pendingEvent.eventId)?.responseTimeoutMs ?? 0) : Infinity
-    const deadlines = [...repairDeadlines(state), pendingAt, ...state.vessels.map((v) => v.completesAt ?? Infinity), ...state.repairDrones.map((d) => d.completesAt ?? Infinity), ...state.processingQueue.map((q) => q.completesAt), state.systems.berthInspectionAt ?? Infinity, state.systems.coolantInspectionAt ?? Infinity, state.systems.scannerCalibrationAt ?? Infinity]
+    // One early sensor report on the first active run; the persistent repair counter
+    // prevents replay after reload. Later wear retains the conservative run cadence.
+    const firstVessel = state.vessels.find((v) => v.id === 'excavator-03')!
+    const firstFaultAt = state.nextRepairId === 1 && firstVessel.assignment === 'extraction'
+      ? firstVessel.startedAt + 2 * 60_000 : Infinity
+    const deadlines = [firstFaultAt, ...repairDeadlines(state), pendingAt, ...state.vessels.map((v) => v.completesAt ?? Infinity), ...state.repairDrones.map((d) => d.completesAt ?? Infinity), ...state.processingQueue.map((q) => q.completesAt), state.systems.berthInspectionAt ?? Infinity, state.systems.coolantInspectionAt ?? Infinity, state.systems.scannerCalibrationAt ?? Infinity]
     const next = Math.min(...deadlines)
     if (next > end) break
     const at = Math.max(state.lastProcessedAt, next)
     state.facilityAgeMs += at - state.lastProcessedAt
     state.lastProcessedAt = at
+    if (firstFaultAt <= at) detectFault(state, firstVessel.id, 'sensor-degradation', at)
     if (pendingAt <= at) applyPendingDecision(state, null, at)
     const systems = state.systems
     if (systems.berthInspectionAt !== null && systems.berthInspectionAt <= at) {

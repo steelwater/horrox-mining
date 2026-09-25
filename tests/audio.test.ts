@@ -31,6 +31,40 @@ describe('native speech priority', () => {
     expect(native.speakNatively.mock.calls[2]![0].text).toBe('Next report')
   })
 
+  it('finishes ordinary speech, then the request, then its immediate decision response', async () => {
+    const completions: Array<() => void> = []
+    native.speakNatively.mockImplementation(() => new Promise<void>((resolve) => completions.push(resolve)))
+    const audio = new AudioDirector()
+    audio.speak('Ordinary report', 'terminal', 3)
+    audio.speak('Incoming request', 'steady', 3, { kind: 'request', cause: 'docking:1' })
+    audio.speak('Decision applied', 'terminal', 2, { kind: 'response', cause: 'docking:1' })
+    expect(native.stopNativeSpeech).not.toHaveBeenCalled()
+    expect(native.speakNatively).toHaveBeenCalledTimes(1)
+    completions[0]!()
+    await flush()
+    expect(native.speakNatively.mock.calls[1]![0].text).toBe('Incoming request')
+    completions[1]!()
+    await flush()
+    expect(native.speakNatively.mock.calls[2]![0].text).toBe('Decision applied')
+  })
+
+  it('replays an interrupted operational request before its response after a genuine safety report', async () => {
+    const completions: Array<() => void> = []
+    native.speakNatively.mockImplementation(() => new Promise<void>((resolve) => completions.push(resolve)))
+    native.stopNativeSpeech.mockResolvedValue(undefined)
+    const audio = new AudioDirector()
+    audio.speak('Request', 'terminal', 3, { kind: 'request', cause: 'r' })
+    audio.speak('Response', 'terminal', 2, { kind: 'response', cause: 'r' })
+    audio.speak('Safety', 'terminal', 1)
+    await flush()
+    completions[1]!()
+    await flush()
+    expect(native.speakNatively.mock.calls.map(([options]) => options.text)).toEqual(['Request', 'Safety', 'Request'])
+    completions[2]!()
+    await flush()
+    expect(native.speakNatively.mock.calls[3]![0].text).toBe('Response')
+  })
+
   it('does not restart queued speech after the terminal is stopped', async () => {
     let finish!: () => void
     native.speakNatively.mockImplementation(() => new Promise<void>(resolve => { finish = resolve }))

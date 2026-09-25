@@ -36,6 +36,7 @@ describe('persistent mine operations', () => {
 
   it('advances extraction, delivery and processing only at their deadlines', () => {
     const state = createInitialState(start)
+    state.nextRepairId = 2 // Established operation: early sensor service already encountered.
     advanceFacility(state, start + 14 * minute)
     expect(state.vessels[0]?.miningProgress).toBeCloseTo(14 / 15)
     expect(state.productionCycles).toBe(0)
@@ -103,6 +104,7 @@ describe('persistent mine operations', () => {
 describe('decisions and operational record', () => {
   it('waits five minutes for preference, then lets the responsible miner decide', () => {
     const state = createInitialState(start)
+    state.nextRepairId = 2 // Established operation: early sensor service already encountered.
     beginRequest(state, 'mining-vein-choice', start)
     advanceFacility(state, start + CAPTAIN_TIMEOUT_MS - 1)
     expect(state.pendingEvent).not.toBeNull()
@@ -135,6 +137,7 @@ describe('decisions and operational record', () => {
 
   it('uses the selected cut duration and yield, including after routine service', () => {
     const state = createInitialState(start)
+    state.nextRepairId = 2 // Isolate extraction timing after the early service interaction.
     beginRequest(state, 'mining-vein-choice', start)
     applyPendingDecision(state, '1', start + minute)
     advanceFacility(state, start + 15 * minute)
