@@ -141,3 +141,70 @@ footer { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-betwee
 .save-tools textarea:focus-visible { outline: 2px solid #e1ff8c; }
 .build-label { width: 100%; color: #a6cbb0; font-size: 0.65rem; padding-top: 6px; }
 button:disabled { opacity: 0.5; cursor: wait; }
+
+/* E-paper modes use only solid black and white, including secondary UI. */
+.mode-high-contrast-white { --contrast-bg: #fff; --contrast-ink: #000; color-scheme: light; }
+.mode-high-contrast-dark { --contrast-bg: #000; --contrast-ink: #fff; color-scheme: dark; }
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) {
+  background: var(--contrast-bg);
+  color: var(--contrast-ink);
+  transition: none;
+}
+.app-shell:is(.mode-high-contrast-white, .mode-high-contrast-dark) * {
+  color: var(--contrast-ink);
+  border-color: var(--contrast-ink);
+  background: none;
+  box-shadow: none;
+  text-shadow: none;
+  opacity: 1;
+  animation: none;
+  transition: none;
+  scrollbar-color: var(--contrast-ink) var(--contrast-bg);
+}
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) :is(.menu-panel, textarea, button) {
+  background: var(--contrast-bg);
+}
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) :is(button, textarea, .readout, .save-tools, .menu-panel) {
+  border: 2px solid var(--contrast-ink);
+}
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) :is(.menu-panel, .terminal-actions) { gap: 8px; }
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) :is(.terminal-actions button, .menu-panel button) {
+  padding: 10px;
+  min-height: 44px;
+  overflow-wrap: anywhere;
+}
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) .menu-trigger { padding: 10px; }
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) .menu-trigger span { background: var(--contrast-ink); }
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) :is(.brand-index, .header-brand-index) {
+  background: var(--contrast-ink);
+  color: var(--contrast-bg);
+}
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) :is(button, summary, textarea):focus-visible {
+  outline: 3px solid var(--contrast-ink);
+  outline-offset: 3px;
+}
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) [aria-pressed="true"] {
+  border: 4px double var(--contrast-ink);
+  font-weight: 900;
+}
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) :is(button, textarea):disabled {
+  opacity: 1;
+  border-style: dashed;
+  cursor: not-allowed;
+  -webkit-text-fill-color: var(--contrast-ink);
+}
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) button:disabled { text-decoration: line-through; }
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) button:active:not(:disabled) {
+  outline: 3px solid var(--contrast-ink);
+  outline-offset: -6px;
+  transform: none;
+}
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) :is(.utility-message, [role="alert"]) { padding: 12px; }
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) :is(.utility-warning, [role="alert"]) { border: 3px dashed var(--contrast-ink); }
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) .utility-confirmation { border: 4px double var(--contrast-ink); }
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) .utility-success { border: 2px solid var(--contrast-ink); }
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) .current-message strong { font-weight: 700; }
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) ::selection { background: var(--contrast-ink); color: var(--contrast-bg); }
+:is(.mode-high-contrast-white, .mode-high-contrast-dark) :is(.readout-meta, .current-message p, .request-state, .key small, .terminal-actions button, .menu-panel button, .transcript summary, .transcript time, .transcript li span, footer, .build-label) {
+  font-size: 0.75rem;
+}

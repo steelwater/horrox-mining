@@ -16,6 +16,21 @@ describe('spoken terminal commands', () => {
   beforeEach(() => { vi.clearAllMocks(); lifecycle.mounted = []; lifecycle.unmounted = [] })
   afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 
+  it('offers both high-contrast modes and restores the visible terminal from black screen without changing the operation', () => {
+    const facility = useFacility()
+    const before = JSON.stringify(facility.state)
+    expect(facility.displayMode.value).toBe('standard')
+    for (const mode of ['high-contrast-white', 'high-contrast-dark', 'dim', 'black']) {
+      facility.cycleDisplayMode()
+      expect(facility.displayMode.value).toBe(mode)
+    }
+    facility.restoreDisplay()
+    expect(facility.displayMode.value).toBe('standard')
+    expect(JSON.stringify(facility.state)).toBe(before)
+    expect(saveFacility).not.toHaveBeenCalled()
+    expect(speech.speak).not.toHaveBeenCalled()
+  })
+
   it('ignores keyboard input before the saved facility has loaded', async () => {
     const facility = useFacility()
     await facility.pressKey('1')

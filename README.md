@@ -207,7 +207,9 @@ The core PR is merged. The [Milestone 3 follow-up brief](https://docs.google.com
 
 `package.json` maintains the app `version` and `milestone`; `src/game/build.ts` derives the footer label and export/transcript metadata. The current label is V0.1.0 / MILESTONE 3; no release version was chosen. Portable JSON wraps the complete persistent state with format/schema/build/export-time metadata. It supports complete schema 3 and 4 envelopes, migrates schema 3 through the existing loader, and rejects unsupported versions or invalid state. Existing installed schema 1–3 saves still migrate normally; export them from the current app to obtain a portable schema 4 envelope.
 
-See [implementation, codes, playtest instructions, save contract, and verification](docs/milestone-3.md). Milestone 3 remains open until Dan playtests and accepts this follow-up.
+See [implementation, codes, playtest instructions, save contract, and verification](docs/milestone-3.md). Dan reported successful playtesting of the final Milestone 3 follow-up on 29 September 2026 and authorized Uplink.
+
+The [High Contrast & Copy Transcript completion brief](https://docs.google.com/document/d/1jzOUAJKVj5cxg4uw5WhExZ9a5CYFTjIHc3E-SvmQ3Vg/edit) adds pure black/white **High Contrast White** and **High Contrast Dark** modes under Terminal options and the Display cycle. Copy Transcript now exposes selectable text if clipboard access fails. See the [implementation and device-playtest handoff](docs/milestone-3-display-playtest.md). Dan reported no issues in the tested version and authorized Uplink on 29 September 2026; the build still identifies V0.1.0 / MILESTONE 3. No Milestone 4 work is included.
 
 ## Continuous integration
 
