@@ -29,10 +29,13 @@ describe('portable save contract', () => {
   it('copies chronological player-readable timestamps and speakers without internal fields', () => {
     const older = { id: 'private-id', text: 'Request', speaker: 'Latch', timestamp: start, operationAgeMs: 0, priority: 3 as const }
     const newer = { ...older, id: 'new', text: 'Confirmed', speaker: 'Control', timestamp: start + 1_000, operationAgeMs: 1_000 }
-    const copied = formatTranscript([newer, older])
+    const entries = [newer, older]
+    const before = JSON.stringify(entries)
+    const copied = formatTranscript(entries)
     expect(copied).toContain('17 Sept 2075, 00:00:00] Latch: Request')
     expect(copied.indexOf('Request')).toBeLessThan(copied.indexOf('Confirmed'))
     expect(copied).not.toMatch(/private-id|priority|operationAgeMs/)
+    expect(JSON.stringify(entries)).toBe(before)
   })
 
   it('round trips complete active repairs, pending requests, cargo, crew, preferences and history', async () => {

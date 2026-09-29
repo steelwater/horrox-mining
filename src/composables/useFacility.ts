@@ -30,7 +30,7 @@ export function useFacility() {
   const importing = ref(false)
   const storageError = ref('')
   let suspendedAt: number | null = null
-  const displayMode = ref<'standard' | 'dim' | 'black'>('standard')
+  const displayMode = ref<'standard' | 'dim' | 'black' | 'high-contrast-white' | 'high-contrast-dark'>('standard')
   const lastMessage = ref('')
   const supportFaultId = ref<string | null>(null)
   const timers: number[] = []
@@ -297,7 +297,8 @@ export function useFacility() {
   }
 
   function cycleDisplayMode(): void {
-    displayMode.value = displayMode.value === 'standard' ? 'dim' : displayMode.value === 'dim' ? 'black' : 'standard'
+    const modes = ['standard', 'high-contrast-white', 'high-contrast-dark', 'dim', 'black'] as const
+    displayMode.value = modes[(modes.indexOf(displayMode.value) + 1) % modes.length]!
   }
 
   function restoreDisplay(): void {
