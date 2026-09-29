@@ -2,8 +2,9 @@
 import { computed, ref } from 'vue'
 import { formatOperationTime, operationDate } from './game/calendar'
 import { useFacility } from './composables/useFacility'
+import { useTerminalTools } from './composables/useTerminalTools'
 import { buildLabel } from './game/build'
-import { formatTranscript, parseSave } from './game/portableSave'
+import { formatTranscript } from './game/portableSave'
 import type { KeypadKey } from './game/types'
 
 const booting = ref(true)
@@ -32,67 +33,13 @@ const latestTranscript = computed(() => [...state.transcript].reverse())
 const menuOpen = ref(false)
 const textDisplayVisible = ref(true)
 
-const utility = ref<'export' | 'import' | 'transcript' | null>(null)
-const saveText = ref('')
-const validatedText = ref<string | null>(null)
-const utilityMessage = ref('')
-const utilityStatus = ref<'success' | 'warning' | 'confirmation'>('success')
-const copying = ref(false)
+const {
+  utility, saveText, validatedText, utilityMessage, utilityStatus, copying,
+  transcriptText, transcriptMessage, transcriptStatus,
+  openUtility, copyText, validateImport, confirmImport, closeTranscript,
+} = useTerminalTools(portableSnapshot, importSnapshot)
 const contrastModes = ['high-contrast-white', 'high-contrast-dark'] as const
 const displayLabel = computed(() => displayMode.value.replaceAll('-', ' ').toUpperCase())
-
-function openUtility(mode: 'export' | 'import'): void {
-  utility.value = mode
-  saveText.value = mode === 'export' ? portableSnapshot() : ''
-  validatedText.value = null
-  utilityMessage.value = ''
-  menuOpen.value = false
-}
-async function copyText(text: string, source: 'transcript' | 'save'): Promise<void> {
-  if (copying.value) return
-  copying.value = true
-  try {
-    await navigator.clipboard.writeText(text)
-    utilityStatus.value = 'success'
-    utilityMessage.value = `${source === 'transcript' ? 'Transcript' : 'Save'} copied to clipboard.`
-  } catch {
-    if (source === 'transcript') {
-      utility.value = 'transcript'
-      saveText.value = text
-      validatedText.value = null
-    }
-    utilityStatus.value = 'warning'
-    utilityMessage.value = 'Clipboard unavailable. Select and copy the text below manually. Your operation is unchanged.'
-  } finally {
-    copying.value = false
-  }
-}
-function validateImport(): void {
-  try {
-    parseSave(saveText.value)
-    validatedText.value = saveText.value
-    utilityStatus.value = 'confirmation'
-    utilityMessage.value = 'Valid save. Import will replace your current operation, including its progress and history. Continue?'
-  } catch (error) {
-    validatedText.value = null
-    utilityStatus.value = 'warning'
-    utilityMessage.value = error instanceof Error ? error.message : 'Save validation failed.'
-  }
-}
-async function confirmImport(): Promise<void> {
-  if (validatedText.value === null || validatedText.value !== saveText.value) return
-  try {
-    await importSnapshot(validatedText.value)
-    utility.value = null
-    validatedText.value = null
-    saveText.value = ''
-    utilityStatus.value = 'success'
-    utilityMessage.value = 'Save imported. Operation restored.'
-  } catch (error) {
-    utilityStatus.value = 'warning'
-    utilityMessage.value = error instanceof Error ? error.message : 'Import failed. Current session retained.'
-  }
-}
 
 void startAudio()
 
@@ -157,21 +104,33 @@ window.setTimeout(() => {
               {{ textDisplayVisible ? 'HIDE TEXT DISPLAY' : 'SHOW TEXT DISPLAY' }}
             </button>
             <button type="button" :disabled="copying || importing" @click="copyText(formatTranscript(state.transcript), 'transcript'); menuOpen = false">{{ copying ? 'COPYING…' : 'COPY TRANSCRIPT' }}</button>
-            <button type="button" :disabled="copying || importing" @click="openUtility('export')">EXPORT SAVE</button>
-            <button type="button" :disabled="copying || importing" @click="openUtility('import')">IMPORT SAVE</button>
+            <button type="button" :disabled="copying || importing" @click="openUtility('export'); menuOpen = false">EXPORT SAVE</button>
+            <button type="button" :disabled="copying || importing" @click="openUtility('import'); menuOpen = false">IMPORT SAVE</button>
           </div>
         </div>
       </header>
 
+      <p v-if="transcriptMessage" class="utility-message" :class="`utility-${transcriptStatus}`" role="status">
+        <strong>{{ transcriptStatus.toUpperCase() }}: </strong>{{ transcriptMessage }}
+      </p>
+      <section v-if="transcriptText !== null" class="save-tools" aria-label="Copy transcript" @keydown.stop>
+        <label for="transcript-copy">COPYABLE TRANSCRIPT</label>
+        <textarea id="transcript-copy" :value="transcriptText" readonly :disabled="copying" spellcheck="false"></textarea>
+        <div class="terminal-actions">
+          <button :disabled="copying" @click="copyText(transcriptText, 'transcript')">{{ copying ? 'COPYING…' : 'COPY' }}</button>
+          <button :disabled="copying" @click="closeTranscript">CLOSE TRANSCRIPT</button>
+        </div>
+      </section>
+
       <p v-if="utilityMessage" class="utility-message" :class="`utility-${utilityStatus}`" role="status">
         <strong>{{ utilityStatus.toUpperCase() }}: </strong>{{ utilityMessage }}
       </p>
-      <section v-if="utility" class="save-tools" :aria-label="utility === 'transcript' ? 'Copy transcript' : utility === 'export' ? 'Export save' : 'Import save'" @keydown.stop>
-        <label for="save-json">{{ utility === 'transcript' ? 'COPYABLE TRANSCRIPT' : utility === 'export' ? 'COPYABLE SAVE JSON' : 'PASTE SAVE JSON' }}</label>
+      <section v-if="utility" class="save-tools" :aria-label="utility === 'export' ? 'Export save' : 'Import save'" @keydown.stop>
+        <label for="save-json">{{ utility === 'export' ? 'COPYABLE SAVE JSON' : 'PASTE SAVE JSON' }}</label>
         <textarea id="save-json" v-model="saveText" :readonly="utility !== 'import'" :disabled="importing || copying"
           spellcheck="false" @input="validatedText = null; utilityMessage = ''"></textarea>
         <div class="terminal-actions">
-          <button v-if="utility !== 'import'" :disabled="copying" @click="copyText(saveText, utility === 'transcript' ? 'transcript' : 'save')">{{ copying ? 'COPYING…' : 'COPY' }}</button>
+          <button v-if="utility !== 'import'" :disabled="copying" @click="copyText(saveText, 'save')">{{ copying ? 'COPYING…' : 'COPY' }}</button>
           <button v-else-if="validatedText === null" @click="validateImport">VALIDATE IMPORT</button>
           <button v-else :disabled="importing" @click="confirmImport">{{ importing ? 'IMPORTING…' : 'CONFIRM REPLACE OPERATION' }}</button>
           <button :disabled="importing || copying" @click="utility = null; validatedText = null; saveText = ''; utilityMessage = ''">{{ utility === 'import' ? 'CANCEL' : 'CLOSE' }}</button>

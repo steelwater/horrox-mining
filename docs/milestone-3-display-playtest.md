@@ -44,3 +44,9 @@ Rollback boundary: unchanged `main` at `7fcd440`; no deployed installation was c
 ## Uplink verification — 29 September 2026
 
 Re-ran all 109 Vitest tests, TypeScript checking, and the production web build successfully. Reused the implementation browser/native-build evidence and Dan’s successful playtest; no behavior changed during Uplink. No lint script exists. GitHub CI must pass both Tests, Typecheck, Build and Android Debug APK on the latest PR revision. Branch-protection setup previously returned HTTP 403 for this private repository’s plan; no policy, subscription, or visibility change is included.
+
+## PR review follow-up — preserve pending imports
+
+On 29 September 2026, [PR review comment](https://github.com/steelwater/horrox-mining/pull/8#issuecomment-5883761061) identified that denied/unavailable transcript copying replaced the shared import buffer. The fallback now uses separate text, feedback, and panel state. An open Import Save panel retains its exact pasted JSON, validation state, and replacement warning. Closing or retrying transcript copy does not discard or import that buffer.
+
+The existing terminal utility state/actions were moved into `useTerminalTools` so this interaction can be regression-tested without adding a test dependency. Five new tests cover denied and missing clipboard APIs before/after validation, retained confirmation, closing the fallback followed by explicit import, and retrying transcript copy without copying import JSON. All **114 tests**, type checking, and the production web build pass. Isolated browser checks verified the actual UI sequence in phone High Contrast White and tablet High Contrast Dark, including successful import after closing the fallback and no horizontal overflow. No simulation, persistence schema, voice, or native source changed; remote CI must pass again on the correction commit before re-review.
