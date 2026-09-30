@@ -161,7 +161,12 @@ export type OperationalEvent = {
 }
 
 export type ChatterLine = { speaker: string; profile: string; text: string }
-export type ChatterExchange = { id: string; lines: ChatterLine[] }
+export type ChatterExchange = {
+  id: string
+  context: 'mining' | 'dock' | 'processing' | 'maintenance' | 'service'
+  cooldownMs: number
+  lines: ChatterLine[]
+}
 
 export type VesselCondition = 'nominal' | 'degraded' | 'fault' | 'critical' | 'offline'
 export type FaultType = 'drill-wear' | 'thruster-malfunction' | 'sensor-degradation' | 'hull-damage' | 'communications-failure' | 'cargo-jam' | 'power-instability' | 'navigation-fault'

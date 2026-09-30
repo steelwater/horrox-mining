@@ -211,6 +211,10 @@ See [implementation, codes, playtest instructions, save contract, and verificati
 
 The [High Contrast & Copy Transcript completion brief](https://docs.google.com/document/d/1jzOUAJKVj5cxg4uw5WhExZ9a5CYFTjIHc3E-SvmQ3Vg/edit) adds pure black/white **High Contrast White** and **High Contrast Dark** modes under Terminal options and the Display cycle. Copy Transcript now exposes selectable text if clipboard access fails. See the [implementation and device-playtest handoff](docs/milestone-3-display-playtest.md). Dan reported no issues in the tested version and authorized Uplink on 29 September 2026; the build still identifies V0.1.0 / MILESTONE 3. No Milestone 4 work is included.
 
+## Post-Milestone 3 operations polish
+
+The [Operations Flow & Chatter Polish brief](https://docs.google.com/document/d/1LlOOn_CHn1iPsqt2mO-jb_TAPBvPwCfRXOYLEAnJAwE/edit) adds context-gated prototype chatter with persistent anti-repeat cooldowns, crew-originated repair requests coordinated by Facility Control, and suppression of unchanged short reconnect briefings. Existing repair actions, safe autonomy, voices and schema 4 remain intact. See the [implementation and playtest handoff](docs/operations-flow-chatter-polish.md). Captain mobile listening and transcript review remain pending; Milestone 4 is outside this change.
+
 ## Continuous integration
 
 GitHub Actions runs `npm ci`, `npm test`, `npm run typecheck`, and `npm run build` on Node 24 for pull requests and pushes to `main`. After **Tests, Typecheck, Build** passes, **Android Debug APK** builds the checked-out code with Java 21, the committed Gradle wrapper and the hosted Ubuntu 24.04 Android SDK. It rebuilds web assets, syncs only Android, and runs `assembleDebug`. Merging a PR triggers this workflow through the push to `main`; PR runs verify the proposed merge before approval.

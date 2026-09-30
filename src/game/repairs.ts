@@ -2,6 +2,10 @@ import { CAPTAIN_TIMEOUT_MS, recordOperation } from './engine'
 import { codeReport } from './operations'
 import type { FacilityState, FaultType, KeypadKey, RepairAction, RepairJob, Vessel, VesselCondition, VesselFault } from './types'
 
+function elapsedMinutes(value: number): string {
+  return `${value} minute${value === 1 ? '' : 's'}`
+}
+
 const MINUTE = 60_000
 const TRAVEL_MS = 2 * MINUTE
 const DOCKING_MS = MINUTE
@@ -62,7 +66,8 @@ export function detectFault(state: FacilityState, vesselId: string, type: FaultT
     vessel.completesAt = at + Math.max(0, vessel.completesAt - at) * previousEfficiency / miningEfficiency(vessel)
   }
   if (fault.severity === 'degraded' && ['extraction', 'delivery'].includes(vessel.assignment)) fault.escalatesAt = at + 30 * MINUTE
-  log(state, vessel, fault, at, definition.operationCode, `${vessel.name}: ${definition.name}. Condition ${vessel.condition.toUpperCase()}. ${definition.diagnostics} Press 3 for vessel support; 1 for urgent incidents.`, 'facility', null, 'Equipment reports an operational fault; unsafe work is suspended immediately.', undefined, before)
+  const requester = type === 'communications-failure' ? undefined : state.miners.find((miner) => miner.id === vessel.minerId)
+  log(state, vessel, fault, at, definition.operationCode, `${requester ? `Control, ${requester.callsign} requesting service for ${vessel.name}.` : `${vessel.name}: telemetry reports a service requirement.`} ${definition.name}. Condition ${vessel.condition.toUpperCase()}. ${definition.diagnostics} Press 3 for vessel support; 1 for urgent incidents.`, requester?.id ?? 'facility', null, 'Equipment reports an operational fault; unsafe work is suspended immediately.', undefined, before)
   return fault
 }
 
@@ -93,7 +98,11 @@ export function recommendation(state: FacilityState, vessel: Vessel, fault: Vess
 export function repairOptions(state: FacilityState, vessel: Vessel, fault: VesselFault): Partial<Record<KeypadKey, { action: RepairAction; label: string }>> {
   const options: ReturnType<typeof repairOptions> = { '1': { action: 'diagnostics', label: 'Diagnostics' }, '8': { action: 'recommend', label: 'Facility recommendation' } }
   if (activeJob(state, fault)) return options
-  if (vessel.dockingState !== 'docked') options['2'] = { action: 'drone', label: canReturn(vessel) && !faultLibrary[fault.type].locations.includes('remote-drone') ? 'Drone recovery to dock' : 'Dispatch repair drone' }
+  if (vessel.dockingState !== 'docked') {
+    const available = state.repairDrones.some((d) => d.state === 'available' && d.targetId === null && !d.maintenanceDue)
+    const remote = faultLibrary[fault.type].locations.includes('remote-drone')
+    options['2'] = { action: 'drone', label: !available ? 'Queue drone support' : remote ? 'Dispatch repair drone' : 'Drone recovery to dock' }
+  }
   if (vessel.dockingState === 'docked' || canReturn(vessel)) {
     options['3'] = { action: 'dock', label: 'Dock repair' }
     if (vessel.dockingState !== 'docked') options['4'] = { action: 'safe-return', label: 'Safe return' }
@@ -127,22 +136,27 @@ export function decideRepair(state: FacilityState, vessel: Vessel, fault: Vessel
   if (action === 'crew') { action = recommendation(state, vessel, fault).action; actor = 'facility' }
   fault.action = action
   fault.decisionAt = null
-  if (action === 'continue') return log(state, vessel, fault, at, 210, `${vessel.name} continuing carefully. Reduced capability; service limit remains monitored.`, actor, action, reason)
+  if (action === 'continue') return log(state, vessel, fault, at, 210, `Confirmed. ${vessel.name} continuing carefully. Reduced capability; service limit remains monitored.`, actor, action, reason)
   if (action === 'stop') {
     hold(vessel)
     fault.escalatesAt = null
     // A safe hold is a real choice, but cannot strand unattended work indefinitely.
     fault.decisionAt = at + CAPTAIN_TIMEOUT_MS
-    return log(state, vessel, fault, at, 180, `${vessel.name} stopped safely. Facility Control will arrange recovery after the response window.`, actor, action, reason)
+    return log(state, vessel, fault, at, 180, `Confirmed. ${vessel.name} stopped safely. Facility Control will arrange recovery after the response window.`, actor, action, reason)
   }
   hold(vessel)
   fault.escalatesAt = null
   const method = action === 'drone' && vessel.dockingState !== 'docked' ? 'remote-drone' : 'dock'
   const job: RepairJob = { id: `repair-${state.nextRepairId++}`, vesselId: vessel.id, faultId: fault.id, method, assignedDroneId: null, state: 'waiting', createdAt: at, dispatchedAt: null, serviceStartedAt: null, completedAt: null, nextAt: null, outcome: null }
   state.repairJobs.push(job)
-  const message = log(state, vessel, fault, at, method === 'dock' ? 235 : 215, `${vessel.name}: ${method === 'dock' ? 'safe return and dock service authorized' : 'drone support requested; holding safely until a drone is free'}. ${reason}`, actor, action, reason, job)
+  const message = log(state, vessel, fault, at, method === 'dock' ? 235 : 215, `${vessel.name}: ${method === 'dock' ? 'safe return and dock service authorized' : 'drone support requested; holding safely pending assignment and dispatch'}. ${reason}`, actor, action, reason, job)
   scheduleRepairs(state, at)
-  return `${message} ${vesselRepairStatus(state, vessel, fault)}`
+  const status = vesselRepairStatus(state, vessel, fault)
+  if (job.assignedDroneId) {
+    const drone = state.repairDrones.find((d) => d.id === job.assignedDroneId)!
+    return `Confirmed. ${drone.name} assigned to ${vessel.name}. ${status} ${reason}`
+  }
+  return `${message} ${status}`
 }
 
 function startReturn(state: FacilityState, job: RepairJob, vessel: Vessel, fault: VesselFault, at: number): void {
@@ -186,7 +200,7 @@ function startService(state: FacilityState, job: RepairJob, vessel: Vessel, faul
   job.nextAt = at + faultLibrary[fault.type].serviceMs
   const drone = state.repairDrones.find((d) => d.id === job.assignedDroneId)
   if (drone) { drone.state = 'servicing'; drone.location = vessel.name; drone.serviceStartedAt = at }
-  log(state, vessel, fault, at, 230, `${vessel.name}: ${faultLibrary[fault.type].requirements}. Service time ${faultLibrary[fault.type].serviceMs / MINUTE} minutes.`, 'facility', null, 'Service began at the assigned location.', job)
+  log(state, vessel, fault, at, 230, `${vessel.name}: ${faultLibrary[fault.type].requirements}. Service time ${elapsedMinutes(faultLibrary[fault.type].serviceMs / MINUTE)}.`, 'facility', null, 'Service began at the assigned location.', job)
 }
 export function repairDeadlines(state: FacilityState): number[] {
   return [...state.repairJobs.map((j) => j.nextAt ?? Infinity), ...state.vessels.flatMap((v) => activeFaults(v).flatMap((f) => [f.decisionAt ?? Infinity, f.escalatesAt ?? Infinity]))]
@@ -233,7 +247,7 @@ export function advanceRepairs(state: FacilityState, at: number): void {
         drone.serviceHistory = [...drone.serviceHistory, job.id].slice(-100)
         drone.maintenanceDue = drone.serviceHistory.length % 4 === 0
       }
-      log(state, vessel, fault, at, 245, `${vessel.name}: ${faultLibrary[fault.type].name} repaired${drone ? ` by ${drone.name}` : ' by dockside crew'} in ${(at - job.serviceStartedAt!) / MINUTE} minutes. Condition ${vessel.condition.toUpperCase()}. ${activeFaults(vessel).length ? 'Further faults remain.' : fault.emergency ? 'Emergency recovery complete.' : 'Service complete.'}`, 'facility', null, 'Inspection confirmed this subsystem restored.', job, before)
+      log(state, vessel, fault, at, 245, `${vessel.name}: ${faultLibrary[fault.type].name} repaired${drone ? ` by ${drone.name}` : ' by dockside crew'} in ${elapsedMinutes((at - job.serviceStartedAt!) / MINUTE)}. Condition ${vessel.condition.toUpperCase()}. ${activeFaults(vessel).length ? 'Further faults remain.' : fault.emergency ? 'Emergency recovery complete.' : 'Service complete.'}`, 'facility', null, 'Inspection confirmed this subsystem restored.', job, before)
       if (fault.emergency && !activeFaults(vessel).some((f) => f.emergency)) log(state, vessel, fault, at, 390, `${vessel.name}: emergency recovery complete. Crew and vessel secure.`, 'facility', null, 'All emergency faults resolved.', job, before)
       if (!activeFaults(vessel).length && vessel.resumeAfterRepair) {
         vessel.resumeAfterRepair = false

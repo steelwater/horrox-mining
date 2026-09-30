@@ -65,6 +65,20 @@ describe('native speech priority', () => {
     expect(native.speakNatively.mock.calls[3]![0].text).toBe('Response')
   })
 
+  it('hears both crew and Control request lines before an immediate repair decision', async () => {
+    const completions: Array<() => void> = []
+    native.speakNatively.mockImplementation(() => new Promise<void>((resolve) => completions.push(resolve)))
+    const audio = new AudioDirector()
+    audio.speak('Ordinary report', 'terminal', 3)
+    audio.speak('Crew service request', 'measured', 2, { kind: 'request', cause: 'fault-1' })
+    audio.speak('Control presents choices', 'terminal', 2, { kind: 'request', cause: 'fault-1' })
+    audio.speak('Drone assigned', 'terminal', 2, { kind: 'response', cause: 'fault-1' })
+    for (let i = 0; i < 3; i++) { completions[i]!(); await flush() }
+    expect(native.speakNatively.mock.calls.map(([options]) => options.text)).toEqual([
+      'Ordinary report', 'Crew service request', 'Control presents choices', 'Drone assigned',
+    ])
+  })
+
   it('does not restart queued speech after the terminal is stopped', async () => {
     let finish!: () => void
     native.speakNatively.mockImplementation(() => new Promise<void>(resolve => { finish = resolve }))
@@ -134,6 +148,17 @@ describe('short crew exchanges', () => {
     await vi.advanceTimersByTimeAsync(60_000)
     expect(native.speakNatively.mock.calls).toHaveLength(2)
     expect(native.speakNatively.mock.calls[1]![0]).toEqual({ text: 'Safety report.', locale: 'en-GB', rate: 0.92, pitch: 0.86, profileId: 'terminal' })
+  })
+
+  it('drops an ambient reply when ordinary operational traffic arrives during the first line', async () => {
+    let finish!: () => void
+    native.speakNatively.mockImplementationOnce(() => new Promise<void>((resolve) => { finish = resolve })).mockResolvedValue(undefined)
+    const audio = new AudioDirector()
+    audio.speakExchange(lines, vi.fn())
+    audio.speak('Drone dispatched', 'terminal', 2)
+    finish()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(native.speakNatively.mock.calls.map(([options]) => options.text)).toEqual([lines[0]!.text, 'Drone dispatched'])
   })
 
   it('does not play a disconnected reply when the first line fails', async () => {

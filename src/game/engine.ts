@@ -391,10 +391,18 @@ export function operationalStatus(state: FacilityState): string {
   return `${faults ? `${faults} ` : ''}${active} mining vessel active. ${docked} docked. ${travelling} in transit or holding. ${state.pendingEvent ? 1 : 0} crew request awaiting attention. ${assigned} repair drones assigned. ${available} available. Processor One has ${state.processingQueue.length} queued loads. ${warnings.join(' ') || 'No major facility warnings.'} ${state.pendingEvent || pendingFaults(state).length ? 'One decision pending.' : 'No decisions pending.'} ${droneStatus(state)}`
 }
 
+export function shouldBriefOnReturn(state: FacilityState, since: number, now: number, previousOperationId: number): boolean {
+  if (now - since >= 5 * 60_000 || state.nextOperationId !== previousOperationId) return true
+  const last = state.transcript.filter((entry) => entry.text.startsWith('Captain terminal connected.')).at(-1)
+  // Suppress only a status the captain already received. A new request or warning
+  // changes this summary even if no operation was recorded (for example on import).
+  return !last || operationAgeAt(state, now) - last.operationAgeMs >= 5 * 60_000
+    || !last.text.includes(operationalStatus(state))
+}
+
 export function returnBriefing(state: FacilityState, since: number, now: number): string {
   const elapsed = Number.isFinite(since) ? Math.max(0, now - since) : 0
-  if (elapsed < 60_000) return `Captain terminal connected. ${operationalStatus(state)}`
-  const recent = state.operations.filter((event) => event.timestamp > since && event.resolution !== 'pending')
+  const recent = state.operations.filter((event) => event.timestamp > since && event.category !== 'chatter')
   // Summarize each repair once; the full transit/service sequence belongs in history.
   const completedFaults = new Set(recent.filter((e) => e.operationCode === 245 && e.repair).map((e) => e.repair!.faultId))
   const entries = recent.filter((event, index) => !event.repair || (completedFaults.has(event.repair.faultId)
@@ -403,8 +411,9 @@ export function returnBriefing(state: FacilityState, since: number, now: number)
   const priority = (event: OperationalEvent) => event.operationCode === 245 || event.operationCode === 390 ? -1 : event.category === 'safety' || (event.actionRequested && event.resolution === 'autonomous') ? 0 : event.category === 'maintenance' ? 1 : 2
   const selected = [...entries].sort((a, b) => priority(a) - priority(b) || b.timestamp - a.timestamp).slice(0, 4).sort((a, b) => a.timestamp - b.timestamp)
   const minutes = Math.floor(elapsed / 60_000)
-  const duration = minutes >= 60 ? `${Math.floor(minutes / 60)} hours and ${minutes % 60} minutes` : `${minutes} minutes`
-  return `Captain terminal connected. Elapsed since last connection: ${duration}. ${elapsed > MAX_CATCHUP_MS ? 'Catch-up is limited to seven days of operations. ' : ''}${selected.length ? `During your absence: ${selected.map((event) => event.summary).join(' ')}` : 'No significant operational changes during your absence.'} ${state.pendingEvent || pendingFaults(state).length ? 'A request is awaiting your preference; the crew can resolve it safely.' : 'No intervention is required.'} Press 0 for current status. Operational history is available in the terminal.`
+  const quantity = (value: number, unit: string) => `${value} ${unit}${value === 1 ? '' : 's'}`
+  const duration = minutes >= 60 ? `${quantity(Math.floor(minutes / 60), 'hour')} and ${quantity(minutes % 60, 'minute')}` : quantity(minutes, 'minute')
+  return `Captain terminal connected. Elapsed since last connection: ${duration}. ${elapsed > MAX_CATCHUP_MS ? 'Catch-up is limited to seven days of operations. ' : ''}${selected.length ? `During your absence: ${selected.map((event) => event.summary).join(' ')}` : 'No significant operational changes during your absence.'} ${state.pendingEvent || pendingFaults(state).length ? 'A request is awaiting your preference; the crew can resolve it safely.' : 'No intervention is required.'} ${operationalStatus(state)} Press 0 for current status. Operational history is available in the terminal.`
 }
 
 function dispatchRoutineService(state: FacilityState, at: number): void {

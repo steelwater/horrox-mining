@@ -53,25 +53,76 @@ describe('spoken terminal commands', () => {
     expect(speech.speak.mock.calls.at(-1)![3]).toEqual({ kind: 'response', cause: request.cause })
   })
 
-  it('limits ambient exchanges to 90-second opportunities and a five-minute per-exchange cooldown', async () => {
+  it('offers chatter only after quiet time and preserves its cooldown beyond the visible transcript', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_800_000_000_000)
     const callbacks = new Map<number, () => void>()
     vi.stubGlobal('window', { setInterval: (callback: () => void, ms: number) => { callbacks.set(ms, callback) } })
-    vi.spyOn(Math, 'random').mockReturnValue(0)
-    speech.speakExchange.mockReturnValue(true)
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0)
+    speech.speakExchange.mockImplementation((lines, onLine) => { onLine(lines[0]); return true })
     const facility = useFacility()
     await facility.initialize()
     facility.skipOnboarding()
-    const chatter = callbacks.get(90_000)!
-    chatter()
+    const opportunity = callbacks.get(90_000)!
+    opportunity()
+    expect(speech.speakExchange).not.toHaveBeenCalled()
+    vi.setSystemTime(Date.now() + 90_000)
+    opportunity()
     const first = speech.speakExchange.mock.calls.at(-1)![0]
-    for (let i = 0; i < 10; i++) chatter()
+    expect(facility.state.operations.at(-1)?.category).toBe('chatter')
+    facility.state.transcript = []
+    opportunity()
     expect(speech.speakExchange.mock.calls.filter(([lines]) => lines === first)).toHaveLength(1)
-    vi.setSystemTime(Date.now() + 300_000)
-    chatter()
-    expect(speech.speakExchange.mock.calls.filter(([lines]) => lines === first)).toHaveLength(2)
-    vi.spyOn(Math, 'random').mockRestore()
+    random.mockRestore()
+  })
+
+  it('announces the assigned crew request before Control confirmation and the applied captain decision', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_800_000_000_000)
+    const callbacks = new Map<number, () => void>()
+    vi.stubGlobal('window', { setInterval: (callback: () => void, ms: number) => { callbacks.set(ms, callback) } })
+    const facility = useFacility()
+    await facility.initialize()
+    facility.skipOnboarding()
+    speech.speak.mockClear()
+    vi.setSystemTime(Date.now() + 120_000)
+    callbacks.get(1_000)!()
+    expect(speech.speak.mock.calls[0]![0]).toContain('Deepwell requesting service')
+    expect(speech.speak.mock.calls[0]![1]).toBe('measured')
+    expect(speech.speak.mock.calls[1]![0]).toContain('Service request received from Deepwell')
+    expect(speech.speak.mock.calls[1]![0]).toContain('press 3 for vessel support')
+    const cause = speech.speak.mock.calls[0]![3].cause
+    expect(speech.speak.mock.calls[1]![3]).toEqual({ kind: 'request', cause })
+    await facility.pressKey('3')
+    await facility.pressKey('2')
+    expect(facility.state.repairDrones[0]?.state).toBe('dispatched')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Repair Drone One assigned')
+    expect(speech.speak.mock.calls.at(-1)![3]).toEqual({ kind: 'response', cause })
+  })
+
+  it('keeps short unchanged visibility cycles quiet but reports a new fault', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_800_000_000_000)
+    const listeners: Record<string, () => void> = {}
+    const doc = { hidden: false, addEventListener: (name: string, callback: () => void) => { listeners[name] = callback } }
+    vi.stubGlobal('document', doc)
+    vi.stubGlobal('window', { setInterval: vi.fn(), addEventListener: vi.fn() })
+    const facility = useFacility()
+    lifecycle.mounted[0]!()
+    await facility.initialize()
+    facility.skipOnboarding()
+    const cycle = (ms: number) => {
+      doc.hidden = true; listeners.visibilitychange!()
+      vi.setSystemTime(Date.now() + ms)
+      doc.hidden = false; listeners.visibilitychange!()
+    }
+    cycle(1_000)
+    speech.speak.mockClear()
+    cycle(1_000)
+    cycle(1_000)
+    expect(speech.speak).not.toHaveBeenCalled()
+    cycle(120_000)
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Sensor degradation')
   })
 
   it('keeps active state unchanged after a failed import and releases input for retry', async () => {
