@@ -99,7 +99,8 @@ export function repairOptions(state: FacilityState, vessel: Vessel, fault: Vesse
   const options: ReturnType<typeof repairOptions> = { '1': { action: 'diagnostics', label: 'Diagnostics' }, '8': { action: 'recommend', label: 'Facility recommendation' } }
   if (activeJob(state, fault)) return options
   if (vessel.dockingState !== 'docked') {
-    const available = state.repairDrones.some((d) => d.state === 'available' && d.targetId === null && !d.maintenanceDue)
+    const vesselBusy = state.repairJobs.some((job) => job.vesselId === vessel.id && job.state !== 'complete' && job.state !== 'waiting')
+    const available = !vesselBusy && state.repairDrones.some((d) => d.state === 'available' && d.targetId === null && !d.maintenanceDue)
     const remote = faultLibrary[fault.type].locations.includes('remote-drone')
     options['2'] = { action: 'drone', label: !available ? 'Queue drone support' : remote ? 'Dispatch repair drone' : 'Drone recovery to dock' }
   }

@@ -100,6 +100,22 @@ describe('repair requests and reconnects', () => {
     expect(repairOptions(state, vessel, fault)['2']?.label).toBe('Queue drone support')
   })
 
+  it('queues drone support behind another active repair on the same vessel even with a free drone', () => {
+    const state = operation()
+    const vessel = state.vessels[0]!
+    const firstFault = detectFault(state, vessel.id, 'drill-wear', start)!
+    const secondFault = detectFault(state, vessel.id, 'sensor-degradation', start)!
+    expect(repairOptions(state, vessel, secondFault)['2']?.label).toBe('Dispatch repair drone')
+    decideRepair(state, vessel, firstFault, 'dock', start)
+    expect(state.repairJobs[0]?.state).toBe('returning-vessel')
+    expect(state.repairDrones[0]?.state).toBe('available')
+    expect(repairOptions(state, vessel, secondFault)['2']?.label).toBe('Queue drone support')
+    decideRepair(state, vessel, secondFault, 'drone', start)
+    expect(state.repairJobs.find((job) => job.faultId === secondFault.id)?.state).toBe('waiting')
+    expect(state.repairDrones[0]?.state).toBe('available')
+    expect(state.repairDrones[0]?.targetId).toBeNull()
+  })
+
   it('uses honest waiting wording and resolves an unanswered request autonomously', () => {
     const state = operation()
     advanceFacility(state, start + 7 * minute)
