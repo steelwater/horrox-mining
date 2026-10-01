@@ -1,3 +1,4 @@
+import { quantity } from './text'
 import { formatOperationTime } from './calendar'
 import type { FacilityState, KeypadKey, OnboardingStatus } from './types'
 
@@ -32,7 +33,7 @@ export const onboardingSteps: OnboardingStep[] = [
   },
   {
     id: 'processing', expectedKey: '6', instruction: 'Press 6 to acknowledge processing status.',
-    report: (s) => `Processor One ready. ${s.processingQueue.length} loads queued. Delivered ore will enter the processing queue.`,
+    report: (s) => `Processor One ready. ${quantity(s.processingQueue.length, 'load')} queued. Delivered ore will enter the processing queue.`,
   },
   {
     id: 'communications', expectedKey: '7', instruction: 'Press 7 to acknowledge communications.',
@@ -40,7 +41,7 @@ export const onboardingSteps: OnboardingStep[] = [
   },
   {
     id: 'support', expectedKey: '8', instruction: 'Press 8 to acknowledge facility support.',
-    report: (s) => `Facility support ready. ${s.repairDrones.filter((d) => d.targetId === null).length} repair drones available. ${s.repairDrones.filter((d) => d.targetId !== null).length} assigned to routine service.`,
+    report: (s) => `Facility support ready. ${quantity(s.repairDrones.filter((d) => d.state === 'available' && !d.maintenanceDue).length, 'repair drone')} available. ${s.repairDrones.filter((d) => d.targetId !== null).length} assigned to routine service.`,
   },
   {
     id: 'crew', expectedKey: '2', instruction: 'Press 2 to acknowledge crew readiness.',

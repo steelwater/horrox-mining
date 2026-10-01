@@ -157,13 +157,26 @@ describe('repair requests and reconnects', () => {
     const fault = state.vessels[0]!.activeFaults[0]!
     const deadline = fault.decisionAt
     const briefing = returnBriefing(state, start, start + 3 * minute)
-    expect(briefing).toContain('Captain, press 3 for vessel support')
-    expect(briefing).toContain('Press 2 for dispatch repair drone')
+    expect(briefing).toContain('Press 3 for vessel support')
+    expect(briefing).not.toContain('Press 2 for dispatch repair drone')
+    expect(briefing.match(/sensor degradation/gi)).toHaveLength(1)
+    expect(briefing).not.toContain('Processor One')
     expect(briefing).not.toContain('resolved the request autonomously')
     expect(fault.decisionAt).toBe(deadline)
     advanceFacility(state, deadline!)
     expect(fault.decisionAt).toBeNull()
     expect(returnBriefing(state, start, deadline!)).not.toContain('Press 2 for dispatch repair drone')
+  })
+
+  it('keeps telemetry attribution and prioritizes an urgent pending repair in the short briefing', () => {
+    const state = operation()
+    detectFault(state, state.vessels[0]!.id, 'communications-failure', start)
+    expect(returnBriefing(state, start, start + minute)).toContain('Telemetry reported communications failure')
+    detectFault(state, state.vessels[0]!.id, 'power-instability', start)
+    const briefing = returnBriefing(state, start, start + minute)
+    expect(briefing).toContain('2 service requests')
+    expect(briefing).toContain('power instability')
+    expect(briefing).not.toContain('communications failure')
   })
 
   it.each([0, 1, 2])('uses correct operational count wording for %i items', (count) => {

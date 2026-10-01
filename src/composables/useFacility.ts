@@ -101,7 +101,7 @@ export function useFacility() {
     }
     if (state.onboardingStatus === 'pending') state.onboardingStatus = 'active'
     if (state.onboardingStatus === 'active' && saved) {
-      announce(onboardingPrompt(state), 'Facility Control', 'terminal', 2)
+      announce(`Readiness resumed. ${onboardingPrompt(state)}`, 'Facility Control', 'terminal', 2)
     }
     state.lastActiveAt = now
     ready.value = true
@@ -127,8 +127,8 @@ export function useFacility() {
     if (state.onboardingStatus === 'active') {
       const result = advanceOnboarding(state.onboardingStatus, state.onboardingStep, key)
       if (key === '0') {
-        if (lastMessage.value) announce(lastMessage.value, 'Facility Control', 'terminal', 2)
-        if (!result.accepted) return
+        announce(`Captain requested repeat. ${onboardingPrompt(state)}`, 'Facility Control', 'terminal', 2)
+        if (!result.accepted) { await persist(); return }
       }
       if (result.accepted && key === '9') state.autopilotEnabled = true
       state.onboardingStatus = result.status
@@ -237,33 +237,33 @@ export function useFacility() {
   function tick(): void {
     if (!ready.value || importing.value || suspendedAt !== null) return
     const before = state.nextOperationId
-    const since = state.lastProcessedAt
     const now = Date.now()
     advanceFacility(state, now)
     state.lastActiveAt = Math.max(state.lastActiveAt, now)
     if (state.nextOperationId !== before) {
       const fresh = state.operations.filter((entry) => Number(entry.id.replace('op-', '')) >= before)
       if (state.onboardingStatus !== 'active') {
-        // A throttled foreground timer can perform the same catch-up as reconnect.
-        if (now - since > 60_000 && fresh.some((entry) => entry.timestamp < now - 1_000)) {
-          recordAbsence(before)
-          announce(returnBriefing(state, since, now), 'Facility Control', 'terminal', 2)
-          void persist()
-          return
-        }
+        // Timer delays do not establish absence. Only restoration and visibility
+        // resume use absence reports; connected events retain their original clocks.
         // Keep each repair transition in event order, including dispatch and completion.
         const reports = fresh.some((entry) => entry.repair) ? fresh.filter((entry) => entry.repair || entry.category === 'safety') : fresh.slice(-1)
         for (const entry of reports) {
           const priority = entry.category === 'safety' && entry.operationCode !== 390 ? 1 : 2
           const requester = state.miners.find((miner) => miner.id === entry.source)
-          if (entry.repair && requester && entry.repair.detectedAt === entry.timestamp && entry.resolution === 'pending' && entry.repair.action === null) {
-            const vessel = state.vessels.find((v) => v.id === entry.repair!.vesselId)!
-            const fault = vessel.activeFaults.find((f) => f.id === entry.repair!.faultId)!
+          const vessel = entry.repair ? state.vessels.find((v) => v.id === entry.repair!.vesselId) : undefined
+          const fault = vessel?.activeFaults.find((f) => f.id === entry.repair!.faultId)
+          if (vessel && fault && fault.decisionAt !== null && entry.repair && requester && entry.repair.detectedAt === entry.timestamp && entry.resolution === 'pending' && entry.repair.action === null) {
             announceRequest({ text: entry.summary, speaker: requester.callsign, profile: requester.voiceProfileId },
-              `Service request received from ${requester.callsign}. ${fault.decisionAt !== null ? `Captain, press 3 for vessel support. In that channel: ${repairMenu(state, vessel, fault)}` : 'The safe operational response follows.'}`,
+              `Service request received from ${requester.callsign}. Captain, press 3 for vessel support. In that channel: ${repairMenu(state, vessel, fault)}`,
               fault.id, priority, entry)
-          } else announce(entry.summary, 'Facility Control', 'terminal', priority,
-            entry.repair ? { kind: entry.resolution === 'pending' ? 'request' : 'response', cause: entry.repair.faultId } : undefined, entry)
+          } else {
+            const timedOut = entry.resolution === 'autonomous' && entry.reason?.includes('response window elapsed')
+            const summary = entry.resolution === 'pending'
+              ? `Earlier request: ${entry.summary.replace(/ Press \d[\s\S]*$/, '')}`
+              : timedOut ? `No captain decision was received within the response window. Facility Control applied the safe operational response. ${entry.summary}` : entry.summary
+            announce(summary, 'Facility Control', 'terminal', priority,
+              entry.repair ? { kind: 'response', cause: entry.repair.faultId } : undefined, entry)
+          }
         }
       }
       void persist()

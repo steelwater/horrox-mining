@@ -21,7 +21,7 @@ describe('operational history export', () => {
     expect(text).toContain(`${newestFirst.length} events`)
     let lastPosition = -1
     for (const entry of state.operations) {
-      const block = `[${formatOperationTime(entry.operationAgeMs)}]\nSource: ${entry.source}\n${entry.repair ? `Actor: ${entry.repair.actor}\n` : ''}Resolution: ${entry.resolution}\n${entry.summary}${entry.reason ? `\nReason: ${entry.reason}` : ''}`
+      const block = `[${formatOperationTime(entry.operationAgeMs)}]\nSource: ${entry.source}\n${entry.repair && entry.repair.actor !== entry.source ? `Actor: ${entry.repair.actor}\n` : ''}Resolution: ${entry.resolution}\n${entry.summary}${entry.reason ? `\nReason: ${entry.reason}` : ''}`
       const position = text.indexOf(block, lastPosition + 1)
       expect(position).toBeGreaterThan(lastPosition)
       lastPosition = position
@@ -31,6 +31,16 @@ describe('operational history export', () => {
     const single = formatOperationalHistory([one])
     expect(single).toContain('1 event\n')
     expect(single).not.toContain('Reason:')
+  })
+
+  it('omits duplicate actors while retaining an actor that differs from the source', () => {
+    const state = createInitialState(start)
+    commissionFacility(state, start)
+    advanceFacility(state, start + 3 * 60_000)
+    const entry = state.operations.find((event) => event.repair)!
+    expect(formatOperationalHistory([entry])).not.toContain('Actor:')
+    const distinct = { ...entry, repair: { ...entry.repair!, actor: 'captain' } }
+    expect(formatOperationalHistory([distinct])).toContain(`Source: ${entry.source}\nActor: captain`)
   })
 
   it('preserves catch-up times through restoration, transcript copying, and a second restoration', () => {

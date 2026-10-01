@@ -100,7 +100,7 @@ describe('spoken terminal commands', () => {
     expect(speech.speak.mock.calls.at(-1)![3]).toEqual({ kind: 'response', cause })
   })
 
-  it.each(['reload', 'visibility', 'delayed timer'] as const)('preserves repair chronology during %s catch-up without replaying expired choices', async (mode) => {
+  it.each(['reload', 'visibility'] as const)('preserves repair chronology during %s catch-up without replaying expired choices', async (mode) => {
     vi.useFakeTimers()
     const start = 1_800_000_000_000
     vi.setSystemTime(start)
@@ -145,6 +145,59 @@ describe('spoken terminal commands', () => {
     expect(JSON.stringify(facility.state.transcript)).toBe(before)
   })
 
+  it.each(['connected', 'delayed timer', 'hidden'] as const)('describes a timeout correctly after reconnecting before expiry (%s)', async (mode) => {
+    vi.useFakeTimers()
+    const start = 1_800_000_000_000
+    vi.setSystemTime(start)
+    const callbacks = new Map<number, () => void>()
+    const listeners: Record<string, () => void> = {}
+    const doc = { hidden: false, addEventListener: (name: string, callback: () => void) => { listeners[name] = callback } }
+    vi.stubGlobal('document', doc)
+    vi.stubGlobal('window', { setInterval: (callback: () => void, ms: number) => callbacks.set(ms, callback), addEventListener: vi.fn() })
+    const facility = useFacility()
+    lifecycle.mounted[0]!()
+    await facility.initialize()
+    facility.skipOnboarding()
+    doc.hidden = true; listeners.visibilitychange!()
+    vi.setSystemTime(start + 6 * 60_000)
+    doc.hidden = false; listeners.visibilitychange!()
+    const deadline = facility.state.vessels[0]!.activeFaults[0]!.decisionAt
+    expect(deadline).toBe(start + 7 * 60_000)
+    const briefing = speech.speak.mock.calls.at(-1)![0]
+    expect(briefing).toContain('1 service request awaiting your decision')
+    expect(briefing).toContain('Press 3 for vessel support')
+    expect(briefing).not.toContain('Press 2 for')
+    expect(briefing).not.toContain('Processor One')
+    const firstNewTranscript = facility.state.transcript.length
+    speech.speak.mockClear()
+    if (mode === 'hidden') { doc.hidden = true; listeners.visibilitychange!() }
+    if (mode === 'connected') {
+      for (let seconds = 361; seconds <= 18 * 60; seconds++) {
+        vi.setSystemTime(start + seconds * 1000); callbacks.get(1000)!()
+      }
+    } else {
+      vi.setSystemTime(start + 18 * 60_000); callbacks.get(1000)!()
+      if (mode === 'hidden') {
+        expect(speech.speak).not.toHaveBeenCalled()
+        doc.hidden = false; listeners.visibilitychange!()
+      }
+    }
+    const fresh = facility.state.transcript.slice(firstNewTranscript).map((entry) => entry.text).join(' ')
+    if (mode === 'hidden') expect(fresh).toContain('resolved the request autonomously while Captain unavailable')
+    else {
+      expect(fresh).toContain('No captain decision was received within the response window')
+      expect(fresh).not.toMatch(/During your absence|Captain unavailable|Captain terminal connected/)
+      expect(speech.speak.mock.calls.map(([text]) => text).join(' ')).not.toMatch(/absence|unavailable/)
+    }
+    expect(facility.state.repairJobs[0]?.state).toBe('complete')
+    const completion = facility.state.operations.find((entry) => entry.operationCode === 245 && entry.repair)!
+    expect(facility.state.transcript.find((entry) => entry.text.includes(completion.summary))?.timestamp).toBe(completion.timestamp)
+    const decision = facility.state.operations.find((entry) => entry.reason?.includes('response window elapsed'))!
+    expect(decision.timestamp).toBe(deadline)
+    expect(decision.resolution).toBe('autonomous')
+    expect(decision.reason).not.toContain('unavailable')
+  })
+
   it('keeps short unchanged visibility cycles quiet but reports a new fault', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_800_000_000_000)
@@ -167,7 +220,7 @@ describe('spoken terminal commands', () => {
     cycle(1_000)
     expect(speech.speak).not.toHaveBeenCalled()
     cycle(120_000)
-    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Sensor degradation')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('sensor degradation')
   })
 
   it('keeps active state unchanged after a failed import and releases input for retry', async () => {
@@ -214,7 +267,7 @@ describe('spoken terminal commands', () => {
     await facility.initialize()
     expect(facility.state.pendingEvent).toBeNull()
     expect(saveFacility).toHaveBeenCalledWith(expect.objectContaining({ pendingEvent: null }))
-    expect(speech.speak.mock.calls[0]![0]).toContain('Facility control has assigned manual sampling')
+    expect(facility.state.transcript.some((entry) => entry.text.includes('Facility control has assigned manual sampling'))).toBe(true)
   })
 
   it('blocks writes when a saved operation cannot be read', async () => {
@@ -276,6 +329,25 @@ describe('spoken terminal commands', () => {
     expect(facility.state.onboardingStep).toBe(9)
   })
 
+  it('does not repeat readiness on timer ticks and identifies an explicit repeat', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_800_000_000_000)
+    const callbacks = new Map<number, () => void>()
+    vi.stubGlobal('window', { setInterval: (callback: () => void, ms: number) => callbacks.set(ms, callback) })
+    const facility = useFacility()
+    await facility.initialize()
+    facility.state.onboardingStep = 9
+    await facility.pressKey('9')
+    const original = speech.speak.mock.calls.at(-1)![0]
+    speech.speak.mockClear()
+    vi.setSystemTime(Date.now() + 3_000)
+    callbacks.get(1000)!()
+    expect(speech.speak).not.toHaveBeenCalled()
+    await facility.pressKey('0')
+    expect(speech.speak.mock.calls[0]![0]).toBe(`Captain requested repeat. ${original}`)
+    expect(facility.state.transcript.at(-2)?.text).toBe(`Captain requested repeat. ${original}`)
+  })
+
   it('enables real autopilot when the tutorial announces it', async () => {
     const facility = useFacility()
     facility.ready.value = true
@@ -286,7 +358,7 @@ describe('spoken terminal commands', () => {
     expect(facility.state.onboardingStep).toBe(10)
     const prompt = speech.speak.mock.calls.at(-1)![0]
     await facility.pressKey('0')
-    expect(speech.speak.mock.calls.at(-2)![0]).toBe(prompt)
+    expect(speech.speak.mock.calls.at(-2)![0]).toBe(`Captain requested repeat. ${prompt}`)
     expect(facility.state.onboardingStep).toBe(11)
   })
 

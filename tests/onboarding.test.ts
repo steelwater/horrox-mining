@@ -4,6 +4,16 @@ import { advanceOnboarding, onboardingPrompt, onboardingSteps } from '../src/gam
 import { createInitialState } from '../src/game/engine'
 
 describe('onboarding', () => {
+  it.each([0, 1, 2])('uses shared count wording for %i ready drones and queued loads', (count) => {
+    const state = createInitialState(0)
+    state.repairDrones = Array.from({ length: count }, (_, i) => ({ ...state.repairDrones[0]!, id: `dr-${i}` }))
+    state.processingQueue = Array.from({ length: count }, (_, i) => ({ id: `load-${i}`, vesselId: state.vessels[0]!.id, tonnes: 12, completesAt: 60_000 }))
+    state.onboardingStep = 7
+    expect(onboardingPrompt(state)).toContain(`${count} repair drone${count === 1 ? '' : 's'} available`)
+    state.onboardingStep = 5
+    expect(onboardingPrompt(state)).toContain(`${count} load${count === 1 ? '' : 's'} queued`)
+  })
+
   it('preserves progress when the wrong key is pressed', () => {
     const result = advanceOnboarding('active', 0, '3')
     expect(result.accepted).toBe(false)

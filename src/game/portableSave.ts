@@ -1,3 +1,4 @@
+import { quantity } from './text'
 import { build, buildLabel } from './build'
 import { formatOperationTime } from './calendar'
 import { createInitialState, findEvent } from './engine'
@@ -14,11 +15,11 @@ export function formatTranscript(entries: TranscriptEntry[]): string {
 
 export function formatOperationalHistory(entries: OperationalEvent[]): string {
   const chronological = [...entries].sort((a, b) => a.operationAgeMs - b.operationAgeMs || a.timestamp - b.timestamp || Number(a.id.replace('op-', '')) - Number(b.id.replace('op-', '')))
-  return [`1st Horrox Mining Ltd. — ${buildLabel}`, 'OPERATIONAL HISTORY', `${entries.length} event${entries.length === 1 ? '' : 's'}`,
+  return [`1st Horrox Mining Ltd. — ${buildLabel}`, 'OPERATIONAL HISTORY', quantity(entries.length, 'event'),
     ...chronological.map((entry) => [
       `[${formatOperationTime(entry.operationAgeMs)}]`,
       `Source: ${entry.source}`,
-      ...(entry.repair ? [`Actor: ${entry.repair.actor}`] : []),
+      ...(entry.repair && entry.repair.actor !== entry.source ? [`Actor: ${entry.repair.actor}`] : []),
       `Resolution: ${entry.resolution}`,
       entry.summary,
       ...(entry.reason ? [`Reason: ${entry.reason}`] : []),

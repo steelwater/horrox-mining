@@ -1,4 +1,5 @@
-import { activeFaults, advanceRepairs, detectFault, detectOperationalWear, droneStatus, miningEfficiency, pendingFaults, repairDeadlines, repairMenu, scheduleRepairs, vesselRepairStatus } from './repairs'
+import { quantity } from './text'
+import { activeFaults, advanceRepairs, detectFault, detectOperationalWear, droneStatus, miningEfficiency, pendingFaults, repairDeadlines, faultLibrary, scheduleRepairs, vesselRepairStatus } from './repairs'
 import { OPERATION_START, operationAgeAt, formatOperationTime } from './calendar'
 import { events, miners } from './content'
 import type { EventDefinition, FacilityState, KeypadKey, PendingEvent, OperationalEvent } from './types'
@@ -392,7 +393,6 @@ export function operationalStatus(state: FacilityState): string {
   const warnings = [state.systems.berth === 'isolated' ? 'Berth Four isolated.' : '', state.systems.coolant === 'inspection' ? 'Coolant inspection in progress.' : '', state.systems.scanner === 'manual-sampling' ? 'Manual sampling active during scanner calibration.' : ''].filter(Boolean)
   const faults = state.vessels.flatMap((v) => activeFaults(v).map((f) => vesselRepairStatus(state, v, f))).join(' ')
   const requests = (state.pendingEvent ? 1 : 0) + pendingFaults(state).length
-  const quantity = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`
   return `${faults ? `${faults} ` : ''}${quantity(active, 'mining vessel')} active. ${docked} docked. ${travelling} in transit or holding. ${quantity(requests, 'crew request')} awaiting attention. ${quantity(assigned, 'repair drone')} assigned. ${available} available. Processor One has ${quantity(state.processingQueue.length, 'queued load')}. ${warnings.join(' ') || 'No major facility warnings.'} ${requests ? `${quantity(requests, 'decision')} pending.` : 'No decisions pending.'} ${droneStatus(state)}`
 }
 
@@ -430,6 +430,15 @@ export function recordAbsenceTranscript(state: FacilityState, previousOperationI
 }
 
 export function returnBriefing(state: FacilityState, since: number, now: number): string {
+  const requests = pendingFaults(state)
+  const pendingRepair = requests.find(({ fault }) => fault.emergency) ?? requests[0]
+  if (pendingRepair) {
+    const { vessel, fault } = pendingRepair
+    const reporter = fault.type === 'communications-failure' ? 'Telemetry' : state.miners.find((miner) => miner.id === vessel.minerId)?.callsign ?? vessel.name
+    return `Captain terminal connected. ${quantity(requests.length, 'service request')} awaiting your decision. ${reporter} reported ${faultLibrary[fault.type].name.toLowerCase()} on ${vessel.name} at ${formatOperationTime(operationAgeAt(state, fault.detectedAt))}. Press 3 for vessel support.${state.pendingEvent ? ' Another crew request is also pending; press 0 to hear it.' : ''}`
+  }
+  if (state.pendingEvent) return `Captain terminal connected. A crew request is awaiting your decision. Press 0 to hear the request and choices.`
+
   const elapsed = Number.isFinite(since) ? Math.max(0, now - since) : 0
   const recent = state.operations.filter((event) => event.timestamp > since && event.category !== 'chatter')
   // Summarize each repair once; the full transit/service sequence belongs in history.
@@ -439,14 +448,9 @@ export function returnBriefing(state: FacilityState, since: number, now: number)
     : !recent.slice(index + 1).some((later) => later.repair?.faultId === event.repair!.faultId)))
   const priority = (event: OperationalEvent) => event.operationCode === 245 || event.operationCode === 390 ? -1 : event.category === 'safety' || (event.actionRequested && event.resolution === 'autonomous') ? 0 : event.category === 'maintenance' ? 1 : 2
   const selected = [...entries].sort((a, b) => priority(a) - priority(b) || b.timestamp - a.timestamp).slice(0, 4).sort((a, b) => a.timestamp - b.timestamp)
-  const pendingRepair = pendingFaults(state)[0]
-  const choices = pendingRepair
-    ? `Captain, press 3 for vessel support. In that channel: ${repairMenu(state, pendingRepair.vessel, pendingRepair.fault)}`
-    : state.pendingEvent ? findEvent(state.pendingEvent.eventId)?.spokenLines.join(' ') ?? '' : ''
   const minutes = Math.floor(elapsed / 60_000)
-  const quantity = (value: number, unit: string) => `${value} ${unit}${value === 1 ? '' : 's'}`
   const duration = minutes >= 60 ? `${quantity(Math.floor(minutes / 60), 'hour')} and ${quantity(minutes % 60, 'minute')}` : minutes === 0 ? 'less than 1 minute' : quantity(minutes, 'minute')
-  return `Captain terminal connected. Elapsed since last connection: ${duration}. ${elapsed > MAX_CATCHUP_MS ? 'Catch-up is limited to seven days of operations. ' : ''}${selected.length ? `During your absence: ${selected.map((event) => `${formatOperationTime(event.operationAgeMs)}: ${absenceReport(event)}`).join(' ')}` : 'No significant operational changes during your absence.'} ${recent.some((event) => event.resolution === 'autonomous' && event.reason?.includes('response window elapsed')) ? 'Facility Control resolved requests autonomously while you were unavailable, after their response windows elapsed. ' : ''}${state.pendingEvent || pendingFaults(state).length ? `A request is awaiting your preference; the crew can resolve it safely. ${choices}` : 'No intervention is required.'} ${operationalStatus(state)} Press 0 for current status. Operational history is available in the terminal.`
+  return `Captain terminal connected. Elapsed since last connection: ${duration}. ${elapsed > MAX_CATCHUP_MS ? 'Catch-up is limited to seven days of operations. ' : ''}${selected.length ? `During your absence: ${selected.map((event) => `${formatOperationTime(event.operationAgeMs)}: ${absenceReport(event)}`).join(' ')}` : 'No significant operational changes during your absence.'} ${recent.some((event) => event.resolution === 'autonomous' && event.reason?.includes('response window elapsed')) ? 'Facility Control resolved requests autonomously while you were unavailable, after their response windows elapsed. ' : ''}No intervention is required. ${operationalStatus(state)} Press 0 for current status. Operational history is available in the terminal.`
 }
 
 function dispatchRoutineService(state: FacilityState, at: number): void {

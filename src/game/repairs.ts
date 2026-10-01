@@ -1,9 +1,10 @@
+import { quantity } from './text'
 import { CAPTAIN_TIMEOUT_MS, recordOperation } from './engine'
 import { codeReport } from './operations'
 import type { FacilityState, FaultType, KeypadKey, RepairAction, RepairJob, Vessel, VesselCondition, VesselFault } from './types'
 
 function elapsedMinutes(value: number): string {
-  return `${value} minute${value === 1 ? '' : 's'}`
+  return quantity(value, 'minute')
 }
 
 const MINUTE = 60_000
