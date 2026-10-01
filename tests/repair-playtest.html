@@ -3,13 +3,22 @@
 <style>body{font:16px system-ui;background:#eee;color:#111}button,select{padding:10px;margin:4px}iframe{display:block;border:1px solid #888;height:844px;max-width:100%}p{max-width:800px}</style></head>
 <body><h1>Milestone 3 local playtest</h1><p>Development fixture only. Use a dedicated localhost port with disposable storage. Scenario buttons replace only the test origin’s save. The embedded terminal is the real app.</p>
 <select id="scenario" aria-label="Scenario"><option value="normal-request">Normal crew request in five seconds</option><option value="drill-wear">A — Degraded drill</option><option value="sensor-degradation">B — Remote sensor repair</option><option value="thruster-malfunction">C — Unattended thruster fault</option><option value="disabled">D — Disabled vessel</option><option value="competing">E — Competing repair demand</option><option value="away">F — Return after absence</option><option value="hull-damage">Dock repair</option></select>
-<button id="load">Load scenario</button><button id="advance">Advance 20 minutes and reload</button><button id="phone">Phone 390px</button><button id="tablet">Tablet 800px</button><p id="result" role="status">No scenario loaded.</p><iframe title="Real Horrox terminal" id="terminal" width="390"></iframe>
+<button id="load">Load scenario</button><button id="advance">Advance 20 minutes and reload</button><button id="phone">Phone 390px</button><button id="tablet">Tablet 800px</button><p id="result" role="status">No scenario loaded.</p><label><input id="block-clipboard" type="checkbox"> Simulate unavailable clipboard</label><iframe title="Real Horrox terminal" id="terminal" width="390"></iframe>
 <script type="module">
 import { createInitialState, commissionFacility, advanceFacility } from '/src/game/engine.ts'
 import { detectFault, decideRepair, escalateFault } from '/src/game/repairs.ts'
 import { loadFacility, saveFacility } from '/src/game/persistence.ts'
 const frame = document.querySelector('#terminal')
 const result = document.querySelector('#result')
+// Test seam confined to this disposable fixture; the production app is unchanged.
+frame.addEventListener('load', () => {
+  if (document.querySelector('#block-clipboard').checked) {
+    Object.defineProperty(frame.contentWindow.navigator, 'clipboard', { value: undefined, configurable: true })
+  }
+})
+document.querySelector('#block-clipboard').onchange = () => {
+  if (frame.src) frame.src = '/?playtest=' + Date.now()
+}
 document.querySelector('#phone').onclick = () => frame.width = '390'
 document.querySelector('#tablet').onclick = () => frame.width = '800'
 document.querySelector('#load').onclick = async () => {

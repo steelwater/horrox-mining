@@ -171,7 +171,7 @@ describe('decisions and operational record', () => {
     const state = createInitialState(start)
     expect(returnBriefing(state, start, start + minute)).toContain('No significant operational changes')
     beginRequest(state, 'problem-sensor-drift', start)
-    expect(operationalStatus(state)).toContain('One decision pending')
+    expect(operationalStatus(state)).toContain('1 decision pending')
     advanceFacility(state, start + 20 * minute)
     const briefing = returnBriefing(state, start, start + 20 * minute)
     expect(briefing).toContain('Facility control has assigned manual sampling')

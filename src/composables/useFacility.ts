@@ -7,6 +7,7 @@ import { AudioDirector, type SpeechContext } from '../audio/audioDirector'
 import { miners } from '../game/content'
 import {
   advanceFacility,
+  recordAbsenceTranscript,
   applyPendingDecision,
   beginRequest,
   operationalStatus,
@@ -23,7 +24,7 @@ import {
 } from '../game/engine'
 import { advanceOnboarding, onboardingPrompt } from '../game/onboarding'
 import { loadFacility, saveFacility, replaceFacility } from '../game/persistence'
-import type { AudioPriority, ChatterLine, FacilityState, KeypadKey, TranscriptEntry } from '../game/types'
+import type { AudioPriority, ChatterLine, FacilityState, KeypadKey, OperationalEvent, TranscriptEntry } from '../game/types'
 
 const audio = new AudioDirector()
 
@@ -46,22 +47,28 @@ export function useFacility() {
     text: string,
     speaker = 'Facility Control',
     priority: AudioPriority = 3,
+    event?: Pick<OperationalEvent, 'timestamp' | 'operationAgeMs'>,
   ): void {
     const entry: TranscriptEntry = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       speaker,
       text,
-      timestamp: Date.now(),
-      operationAgeMs: operationAgeAt(state, Date.now()),
+      timestamp: event?.timestamp ?? Date.now(),
+      operationAgeMs: event?.operationAgeMs ?? operationAgeAt(state, Date.now()),
       priority,
     }
     state.transcript = [...state.transcript, entry].slice(-80)
     lastMessage.value = text
   }
 
-  function announce(text: string, speaker = 'Facility Control', profileId = 'terminal', priority: AudioPriority = 3, context?: SpeechContext): void {
-    recordTranscript(text, speaker, priority)
+  function announce(text: string, speaker = 'Facility Control', profileId = 'terminal', priority: AudioPriority = 3, context?: SpeechContext, event?: OperationalEvent): void {
+    recordTranscript(text, speaker, priority, event)
     audio.speak(text, profileId, priority, context)
+  }
+
+  function recordAbsence(previousOperationId: number): void {
+    recordAbsenceTranscript(state, previousOperationId)
+    lastMessage.value = state.transcript.at(-1)?.text ?? ''
   }
 
   async function persist(): Promise<void> {
@@ -222,19 +229,28 @@ export function useFacility() {
 
   // Reusable crew → coordinator handoff. Both lines belong to the request,
   // so even an immediate captain response must wait for the confirmation.
-  function announceRequest(crew: ChatterLine, confirmation: string, cause: string, priority: AudioPriority): void {
-    announce(crew.text, crew.speaker, crew.profile, priority, { kind: 'request', cause })
-    announce(confirmation, 'Facility Control', 'terminal', priority, { kind: 'request', cause })
+  function announceRequest(crew: ChatterLine, confirmation: string, cause: string, priority: AudioPriority, event: OperationalEvent): void {
+    announce(crew.text, crew.speaker, crew.profile, priority, { kind: 'request', cause }, event)
+    announce(confirmation, 'Facility Control', 'terminal', priority, { kind: 'request', cause }, event)
   }
 
   function tick(): void {
     if (!ready.value || importing.value || suspendedAt !== null) return
     const before = state.nextOperationId
-    advanceFacility(state, Date.now())
-    state.lastActiveAt = Math.max(state.lastActiveAt, Date.now())
+    const since = state.lastProcessedAt
+    const now = Date.now()
+    advanceFacility(state, now)
+    state.lastActiveAt = Math.max(state.lastActiveAt, now)
     if (state.nextOperationId !== before) {
       const fresh = state.operations.filter((entry) => Number(entry.id.replace('op-', '')) >= before)
       if (state.onboardingStatus !== 'active') {
+        // A throttled foreground timer can perform the same catch-up as reconnect.
+        if (now - since > 60_000 && fresh.some((entry) => entry.timestamp < now - 1_000)) {
+          recordAbsence(before)
+          announce(returnBriefing(state, since, now), 'Facility Control', 'terminal', 2)
+          void persist()
+          return
+        }
         // Keep each repair transition in event order, including dispatch and completion.
         const reports = fresh.some((entry) => entry.repair) ? fresh.filter((entry) => entry.repair || entry.category === 'safety') : fresh.slice(-1)
         for (const entry of reports) {
@@ -245,9 +261,9 @@ export function useFacility() {
             const fault = vessel.activeFaults.find((f) => f.id === entry.repair!.faultId)!
             announceRequest({ text: entry.summary, speaker: requester.callsign, profile: requester.voiceProfileId },
               `Service request received from ${requester.callsign}. ${fault.decisionAt !== null ? `Captain, press 3 for vessel support. In that channel: ${repairMenu(state, vessel, fault)}` : 'The safe operational response follows.'}`,
-              fault.id, priority)
+              fault.id, priority, entry)
           } else announce(entry.summary, 'Facility Control', 'terminal', priority,
-            entry.repair ? { kind: entry.resolution === 'pending' ? 'request' : 'response', cause: entry.repair.faultId } : undefined)
+            entry.repair ? { kind: entry.resolution === 'pending' ? 'request' : 'response', cause: entry.repair.faultId } : undefined, entry)
         }
       }
       void persist()
@@ -267,6 +283,7 @@ export function useFacility() {
       suspendedAt = null
       const before = state.nextOperationId
       advanceFacility(state, Date.now())
+      recordAbsence(before)
       if (shouldBriefOnReturn(state, since, Date.now(), before)) announce(returnBriefing(state, since, Date.now()), 'Facility Control', 'terminal', 2)
       state.lastActiveAt = Date.now()
       void persist()

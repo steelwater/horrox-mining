@@ -100,6 +100,51 @@ describe('spoken terminal commands', () => {
     expect(speech.speak.mock.calls.at(-1)![3]).toEqual({ kind: 'response', cause })
   })
 
+  it.each(['reload', 'visibility', 'delayed timer'] as const)('preserves repair chronology during %s catch-up without replaying expired choices', async (mode) => {
+    vi.useFakeTimers()
+    const start = 1_800_000_000_000
+    vi.setSystemTime(start)
+    const callbacks = new Map<number, () => void>()
+    const listeners: Record<string, () => void> = {}
+    const doc = { hidden: false, addEventListener: (name: string, callback: () => void) => { listeners[name] = callback } }
+    vi.stubGlobal('document', doc)
+    vi.stubGlobal('window', { setInterval: (callback: () => void, ms: number) => callbacks.set(ms, callback), addEventListener: vi.fn() })
+    const saved = createInitialState(start)
+    commissionFacility(saved, start)
+    saved.onboardingStatus = 'complete'
+    if (mode === 'reload') {
+      vi.mocked(loadFacility).mockResolvedValueOnce(saved)
+      vi.setSystemTime(start + 20 * 60_000)
+    }
+    const facility = useFacility()
+    lifecycle.mounted[0]!()
+    await facility.initialize()
+    if (mode !== 'reload') {
+      facility.skipOnboarding()
+      speech.speak.mockClear()
+      if (mode === 'visibility') { doc.hidden = true; listeners.visibilitychange!() }
+      vi.setSystemTime(start + 20 * 60_000)
+      if (mode === 'visibility') { doc.hidden = false; listeners.visibilitychange!() }
+      else callbacks.get(1_000)!()
+    }
+    const events = facility.state.operations.filter((event) => event.repair)
+    expect(new Set(events.map((event) => event.timestamp)).size).toBeGreaterThan(4)
+    for (const event of events) {
+      const report = facility.state.transcript.find((entry) => entry.id === `absence-${event.id}`)!
+      expect(report).toBeDefined()
+      expect(report.timestamp).toBe(event.timestamp)
+      expect(report.operationAgeMs).toBe(event.operationAgeMs)
+      expect(report.text).not.toContain('Press 3')
+    }
+    expect(facility.state.transcript.some((entry) => entry.text.includes('resolved the request autonomously while Captain unavailable'))).toBe(true)
+    expect(speech.speak).toHaveBeenCalledTimes(1)
+    expect(speech.speak.mock.calls[0]![0]).toContain('after their response windows elapsed')
+    expect(speech.speak.mock.calls[0]![0]).not.toContain('press 3 for vessel support')
+    const before = JSON.stringify(facility.state.transcript)
+    callbacks.get(1_000)!()
+    expect(JSON.stringify(facility.state.transcript)).toBe(before)
+  })
+
   it('keeps short unchanged visibility cycles quiet but reports a new fault', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_800_000_000_000)

@@ -145,6 +145,57 @@ describe('repair resources and lifecycle', () => {
     expect(vessel.condition).toBe('nominal')
   })
 
+  it('holds cargo until dockside hull repair completes, in stepped and catch-up operation', () => {
+    const state = createInitialState(start)
+    commissionFacility(state, start)
+    state.nextRepairId = 2 // Skip the commissioning sensor incident.
+    const vessel = state.vessels[0]!
+    vessel.operatingRuns = 48 // Next run discovers hull damage on docking.
+    const offline = structuredClone(state)
+    advanceFacility(state, start + 17 * minute)
+    expect(activeFaults(vessel)[0]?.type).toBe('hull-damage')
+    expect(vessel.cargo).toBe(12)
+    expect(vessel.delivered).toBe(0)
+    expect(state.processingQueue).toHaveLength(0)
+    advanceFacility(state, start + 32 * minute - 1)
+    expect(vessel.assignment).toBe('standby')
+    expect(vessel.cargo).toBe(12)
+    expect(vessel.delivered).toBe(0)
+    advanceFacility(state, start + 32 * minute)
+    expect(vessel.condition).toBe('nominal')
+    expect(vessel.assignment).toBe('delivery')
+    advanceFacility(state, start + 34 * minute)
+    expect(vessel.delivered).toBe(12)
+    expect(vessel.assignment).toBe('extraction')
+    advanceFacility(offline, start + 34 * minute)
+    expect(offline).toEqual(state)
+    const complete = state.operations.find((event) => event.operationCode === 245 && event.repair)!
+    const delivery = state.operations.find((event) => event.operationCode === 165)!
+    expect(delivery.timestamp).toBeGreaterThan(complete.timestamp)
+  })
+
+  it('keeps extraction and delivery held through every stage of simultaneous critical repairs', () => {
+    const { state, vessel, fault } = setup('power-instability')
+    vessel.cargo = 12
+    const hull = detectFault(state, vessel.id, 'hull-damage', start)!
+    decideRepair(state, vessel, fault, 'drone', start)
+    decideRepair(state, vessel, hull, 'crew', start)
+    const offline = structuredClone(state)
+    for (let seconds = 1; seconds <= 35 * 60; seconds++) {
+      advanceFacility(state, start + seconds * 1000)
+      if (activeFaults(vessel).length) {
+        expect(vessel.assignment).toBe('standby')
+        expect(vessel.delivered).toBe(0)
+        expect(state.productionCycles).toBe(0)
+      }
+    }
+    advanceFacility(offline, start + 35 * minute)
+    expect(offline).toEqual(state)
+    const finalRepair = state.operations.filter((event) => event.operationCode === 245 && event.repair).at(-1)!
+    const delivery = state.operations.find((event) => event.operationCode === 165)!
+    expect(delivery.timestamp).toBeGreaterThan(finalRepair.timestamp)
+  })
+
   it('repairs simultaneous faults without prematurely declaring an emergency resolved', () => {
     const { state, vessel, fault } = setup('power-instability')
     const hull = detectFault(state, vessel.id, 'hull-damage', start)!
