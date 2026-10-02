@@ -237,15 +237,6 @@ export function advanceFacility(state: FacilityState, now: number): void {
     state.lastProcessedAt = now
     return
   }
-  for (const vessel of state.vessels) {
-    if (vessel.routineServiceDue && vessel.assignment === 'extraction') {
-      vessel.assignment = 'delivery'
-      vessel.dockingState = 'returning'
-      vessel.startedAt = state.lastProcessedAt
-      vessel.completesAt = state.lastProcessedAt + TRANSIT_MS
-      routine(state, state.lastProcessedAt, 'facility', 'maintenance', `${vessel.name} suspended extraction and is returning for service.`, [vessel.id], 'Continuing extraction with a service requirement is unnecessary operational risk.')
-    }
-  }
   dispatchRoutineService(state, state.lastProcessedAt)
   scheduleRepairs(state, state.lastProcessedAt)
   while (true) {
@@ -392,8 +383,9 @@ export function operationalStatus(state: FacilityState): string {
   const available = state.repairDrones.filter((d) => d.state === 'available' && !d.maintenanceDue).length
   const warnings = [state.systems.berth === 'isolated' ? 'Berth Four isolated.' : '', state.systems.coolant === 'inspection' ? 'Coolant inspection in progress.' : '', state.systems.scanner === 'manual-sampling' ? 'Manual sampling active during scanner calibration.' : ''].filter(Boolean)
   const faults = state.vessels.flatMap((v) => activeFaults(v).map((f) => vesselRepairStatus(state, v, f))).join(' ')
+  const service = state.vessels.filter((v) => v.routineServiceDue).map((v) => `${v.name}: ${state.repairDrones.some((d) => d.targetId === v.id && d.state === 'servicing' && d.assignedJobId === null) ? 'routine service in progress; work suspended' : 'routine service scheduled after safe cargo delivery'}.`).join(' ')
   const requests = (state.pendingEvent ? 1 : 0) + pendingFaults(state).length
-  return `${faults ? `${faults} ` : ''}${quantity(active, 'mining vessel')} active. ${docked} docked. ${travelling} in transit or holding. ${quantity(requests, 'crew request')} awaiting attention. ${quantity(assigned, 'repair drone')} assigned. ${available} available. Processor One has ${quantity(state.processingQueue.length, 'queued load')}. ${warnings.join(' ') || 'No major facility warnings.'} ${requests ? `${quantity(requests, 'decision')} pending.` : 'No decisions pending.'} ${droneStatus(state)}`
+  return `${faults ? `${faults} ` : ''}${service ? `${service} ` : ''}${quantity(active, 'mining vessel')} active. ${docked} docked. ${travelling} in transit or holding. ${quantity(requests, 'crew request')} awaiting attention. ${quantity(assigned, 'repair drone')} assigned. ${available} available. Processor One has ${quantity(state.processingQueue.length, 'queued load')}. ${warnings.join(' ') || 'No major facility warnings.'} ${requests ? `${quantity(requests, 'decision')} pending.` : 'No decisions pending.'} ${droneStatus(state)}`
 }
 
 export function shouldBriefOnReturn(state: FacilityState, since: number, now: number, previousOperationId: number): boolean {
@@ -454,10 +446,12 @@ export function returnBriefing(state: FacilityState, since: number, now: number)
 }
 
 function dispatchRoutineService(state: FacilityState, at: number): void {
-  for (const vessel of state.vessels.filter((v) => v.routineServiceDue && v.dockingState === 'docked' && activeFaults(v).length === 0)) {
+  for (const vessel of state.vessels.filter((v) => v.routineServiceDue && v.assignment === 'standby' && v.dockingState === 'docked' && v.cargo === 0 && activeFaults(v).length === 0)) {
     if (state.repairDrones.some((d) => d.targetId === vessel.id)) continue
     const drone = state.repairDrones.find((d) => d.targetId === null && d.state === 'available' && !d.maintenanceDue)
     if (!drone) continue
+    vessel.assignment = 'standby'
+    vessel.completesAt = null
     drone.targetId = vessel.id
     drone.state = 'servicing'
     drone.location = vessel.name

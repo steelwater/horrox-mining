@@ -1,5 +1,5 @@
 import { quantity } from './text'
-import { CAPTAIN_TIMEOUT_MS, recordOperation } from './engine'
+import { CAPTAIN_TIMEOUT_MS, PRODUCTION_CYCLE_MS, recordOperation } from './engine'
 import { codeReport } from './operations'
 import type { FacilityState, FaultType, KeypadKey, RepairAction, RepairJob, Vessel, VesselCondition, VesselFault } from './types'
 
@@ -253,7 +253,22 @@ export function advanceRepairs(state: FacilityState, at: number): void {
       if (fault.emergency && !activeFaults(vessel).some((f) => f.emergency)) log(state, vessel, fault, at, 390, `${vessel.name}: emergency recovery complete. Crew and vessel secure.`, 'facility', null, 'All emergency faults resolved.', job, before)
       if (!activeFaults(vessel).length && vessel.resumeAfterRepair) {
         vessel.resumeAfterRepair = false
-        vessel.assignment = 'delivery'; vessel.startedAt = at; vessel.completesAt = at + TRAVEL_MS; vessel.dockingState = vessel.dockingState === 'docked' ? 'docked' : 'returning'
+        vessel.startedAt = at
+        if (vessel.cargo > 0 || vessel.routineServiceDue) {
+          // Cargo and scheduled service still require a real return/unload phase.
+          if (vessel.dockingState === 'docked' && vessel.cargo === 0) {
+            vessel.assignment = 'standby'; vessel.completesAt = null
+          } else {
+            vessel.assignment = 'delivery'; vessel.completesAt = at + TRAVEL_MS
+            if (vessel.dockingState !== 'docked') vessel.dockingState = 'returning'
+          }
+        } else {
+          const remote = vessel.dockingState !== 'docked'
+          vessel.assignment = 'extraction'; vessel.dockingState = 'deployed'
+          vessel.miningProgress = 0
+          vessel.completesAt = at + PRODUCTION_CYCLE_MS + (vessel.cut === 'dense' ? 5 * MINUTE : 0)
+          log(state, vessel, fault, at, 101, `${vessel.name}: ${remote ? 'extraction resumed at the remote work site; no vessel return was required' : 'redeployed for extraction after dock service'}.`, 'facility', null, 'Fault service completed before productive work resumed.', job)
+        }
       }
     }
   }

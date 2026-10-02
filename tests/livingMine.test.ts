@@ -24,6 +24,7 @@ describe('persistent mine operations', () => {
   it('saves and restores miners, assignments, cargo, queues, drones and history', async () => {
     const state = createInitialState(start)
     state.onboardingStatus = 'complete'
+    state.nextRepairId = 2 // Isolate routine-service persistence from early remote repair timing.
     advanceFacility(state, start + 69 * minute)
     expect(state.repairDrones[0]?.targetId).toBe('excavator-03')
     expect(state.processingQueue.length).toBe(1)
@@ -68,21 +69,44 @@ describe('persistent mine operations', () => {
 
   it('completes routine service and returns a vessel to work without player input', () => {
     const state = createInitialState(start)
+    state.nextRepairId = 2
     advanceFacility(state, start + 73 * minute)
     expect(state.vessels[0]?.condition).toBe('nominal')
     expect(state.repairDrones[0]?.targetId).toBeNull()
     expect(state.operations.some((e) => e.summary.includes('completed routine service'))).toBe(true)
   })
 
-  it('returns an unsafe vessel to dock instead of continuing extraction', () => {
+  it.each(['extraction', 'delivery'] as const)('schedules routine maintenance due during %s until after safe cargo delivery', (phase) => {
     const state = createInitialState(start)
-    state.vessels[0]!.routineServiceDue = true
-    advanceFacility(state, start + minute)
-    expect(state.vessels[0]?.dockingState).toBe('returning')
-    expect(state.productionCycles).toBe(0)
-    expect(state.operations[0]?.reason).toContain('unnecessary operational risk')
-    advanceFacility(state, start + 7 * minute)
-    expect(state.vessels[0]?.condition).toBe('nominal')
+    state.nextRepairId = 2
+    const vessel = state.vessels[0]!
+    const dueAt = start + (phase === 'extraction' ? 5 : 16) * minute
+    advanceFacility(state, dueAt)
+    vessel.routineServiceDue = true
+    const offline = structuredClone(state)
+    advanceFacility(state, dueAt + 1)
+    expect(vessel.assignment).toBe(phase)
+    expect(state.repairDrones[0]?.state).toBe('available')
+    expect(operationalStatus(state)).toContain('routine service scheduled')
+    advanceFacility(state, start + 17 * minute)
+    expect(vessel.delivered).toBe(12)
+    expect(vessel.cargo).toBe(0)
+    expect(vessel.assignment).toBe('standby')
+    expect(vessel.completesAt).toBeNull()
+    expect(state.repairDrones[0]?.state).toBe('servicing')
+    const run = vessel.run
+    advanceFacility(state, start + 22 * minute - 1)
+    expect(vessel.assignment).toBe('standby')
+    expect(vessel.run).toBe(run)
+    expect(state.productionCycles).toBe(1)
+    expect(vessel.delivered).toBe(12)
+    expect(vessel.routineServiceDue).toBe(true)
+    advanceFacility(state, start + 22 * minute)
+    expect(vessel.assignment).toBe('extraction')
+    expect(vessel.run).toBe(run + 1)
+    expect(vessel.routineServiceDue).toBe(false)
+    advanceFacility(offline, start + 22 * minute)
+    expect(offline).toEqual(state)
   })
 
   it('limits very long absences without damage, game-over, or replayable catch-up', () => {

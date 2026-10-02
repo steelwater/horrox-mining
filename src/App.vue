@@ -177,7 +177,7 @@ window.setTimeout(() => {
       <section class="terminal-actions" aria-label="Terminal options">
         <button @click.stop="cycleDisplayMode">DISPLAY: {{ displayLabel }}</button>
         <button v-if="onboardingActive" @click="skipOnboarding">DELEGATE CHECKS</button>
-        <button v-else @click="replayOnboarding">REVIEW READINESS</button>
+        <button v-else @click="replayOnboarding">READINESS CHECK</button>
       </section>
 
       <details class="transcript">

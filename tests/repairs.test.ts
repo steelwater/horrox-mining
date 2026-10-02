@@ -287,3 +287,52 @@ describe('repair persistence and time away', () => {
     for (const code of [201, 205, 210, 215, 220, 225, 230, 235, 240, 245, 250, 290, 301, 302, 303, 304, 305, 306, 310, 315, 320, 325, 330, 340, 350, 390]) expect(operationCodes[code]).toBeTruthy()
   })
 })
+
+
+describe('post-repair continuity', () => {
+  it.each(['stable', 'dense'] as const)('resumes an empty %s extractor at the remote site only after service completes', (cut) => {
+    const state = createInitialState(start)
+    commissionFacility(state, start)
+    const vessel = state.vessels[0]!
+    vessel.cut = cut
+    const fault = detectFault(state, vessel.id, 'sensor-degradation', start)!
+    decideRepair(state, vessel, fault, 'drone', start)
+    const completesAt = start + 6 * minute + 1000
+    advanceFacility(state, completesAt - 1)
+    expect(vessel.assignment).toBe('standby')
+    expect(vessel.completesAt).toBeNull()
+    advanceFacility(state, completesAt)
+    expect(vessel.assignment).toBe('extraction')
+    expect(vessel.dockingState).toBe('deployed')
+    expect(vessel.completesAt).toBe(completesAt + (cut === 'dense' ? 20 : 15) * minute)
+    advanceFacility(state, completesAt + 2 * minute)
+    expect(state.operations.some((event) => event.operationCode === 165)).toBe(false)
+    expect(state.operations.some((event) => event.summary.includes('extraction resumed at the remote work site'))).toBe(true)
+  })
+
+  it('unloads retained dockside cargo before starting scheduled routine service', () => {
+    const state = createInitialState(start)
+    commissionFacility(state, start)
+    state.nextRepairId = 2
+    const vessel = state.vessels[0]!
+    vessel.operatingRuns = 48
+    vessel.routineServiceDue = true
+    advanceFacility(state, start + 32 * minute)
+    expect(vessel.assignment).toBe('delivery')
+    expect(vessel.dockingState).toBe('docked')
+    expect(vessel.cargo).toBe(12)
+    // A normal next tick must not assign routine service to this scheduled unload.
+    advanceFacility(state, start + 32 * minute + 1000)
+    expect(state.repairDrones[0]?.state).toBe('available')
+    advanceFacility(state, start + 34 * minute)
+    expect(vessel.delivered).toBe(12)
+    expect(vessel.assignment).toBe('standby')
+    expect(vessel.completesAt).toBeNull()
+    expect(state.repairDrones[0]?.state).toBe('servicing')
+    advanceFacility(state, start + 39 * minute - 1)
+    expect(vessel.assignment).toBe('standby')
+    expect(vessel.delivered).toBe(12)
+    advanceFacility(state, start + 39 * minute)
+    expect(vessel.assignment).toBe('extraction')
+  })
+})

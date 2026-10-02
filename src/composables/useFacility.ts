@@ -93,15 +93,10 @@ export function useFacility() {
     if (saved) {
       const restored = restoreState(saved, now)
       Object.assign(state, restored.state)
+      pauseReadiness()
       if (shouldBriefOnReturn(state, saved.lastActiveAt, now, saved.nextOperationId)) announce(returnBriefing(state, saved.lastActiveAt, now), 'Facility Control', 'terminal', 2)
     } else {
       Object.assign(state, createInitialState(now))
-      state.onboardingStatus = 'active'
-      announce(onboardingPrompt(state), 'Facility Control', 'terminal', 2)
-    }
-    if (state.onboardingStatus === 'pending') state.onboardingStatus = 'active'
-    if (state.onboardingStatus === 'active' && saved) {
-      announce(`Readiness resumed. ${onboardingPrompt(state)}`, 'Facility Control', 'terminal', 2)
     }
     state.lastActiveAt = now
     ready.value = true
@@ -246,8 +241,22 @@ export function useFacility() {
         // Timer delays do not establish absence. Only restoration and visibility
         // resume use absence reports; connected events retain their original clocks.
         // Keep each repair transition in event order, including dispatch and completion.
-        const reports = fresh.some((entry) => entry.repair) ? fresh.filter((entry) => entry.repair || entry.category === 'safety') : fresh.slice(-1)
-        for (const entry of reports) {
+        const reports = fresh.filter((entry) => entry.category !== 'chatter')
+        for (let i = 0; i < reports.length; i++) {
+          const entry = reports[i]!
+          // Preserve individual transcript clocks, but combine related simultaneous
+          // routine reports (for example cargo delivery followed by service assignment).
+          const group = [entry]
+          if (!entry.repair && entry.resolution !== 'pending' && entry.category !== 'safety') {
+            while (reports[i + 1] && !reports[i + 1]!.repair && reports[i + 1]!.resolution !== 'pending'
+              && reports[i + 1]!.category !== 'safety' && reports[i + 1]!.timestamp === entry.timestamp
+              && reports[i + 1]!.relatedIds.some((id) => entry.relatedIds.includes(id))) group.push(reports[++i]!)
+          }
+          if (group.length > 1) {
+            for (const report of group) recordTranscript(report.summary, 'Facility Control', 2, report)
+            audio.speak(group.map((report) => report.summary).join(' '), 'terminal', 2)
+            continue
+          }
           const priority = entry.category === 'safety' && entry.operationCode !== 390 ? 1 : 2
           const requester = state.miners.find((miner) => miner.id === entry.source)
           const vessel = entry.repair ? state.vessels.find((v) => v.id === entry.repair!.vesselId) : undefined
@@ -274,6 +283,7 @@ export function useFacility() {
     if (!ready.value || importing.value) return
     if (document.hidden) {
       tick()
+      pauseReadiness()
       audio.cancelChatter()
       suspendedAt = Date.now()
       state.lastActiveAt = suspendedAt
@@ -323,11 +333,19 @@ export function useFacility() {
     void persist()
   }
 
+  function pauseReadiness(): void {
+    if (state.onboardingStatus === 'active') {
+      state.onboardingStatus = 'pending'
+      audio.stop()
+    }
+  }
+
   function replayOnboarding(): void {
     if (!ready.value || importing.value) return
     audio.cancelChatter()
+    if (state.onboardingStatus !== 'pending' && state.onboardingStatus !== 'active') state.onboardingStep = 0
     state.onboardingStatus = 'active'
-    state.onboardingStep = 0
+    supportFaultId.value = null
     announce(onboardingPrompt(state), 'Facility Control', 'terminal', 2)
     void persist()
   }
@@ -349,6 +367,7 @@ export function useFacility() {
   async function importSnapshot(text: string): Promise<void> {
     if (!ready.value || importing.value) throw new Error('Terminal is busy. Please retry.')
     const imported = parseSave(text)
+    if (imported.onboardingStatus === 'active') imported.onboardingStatus = 'pending'
     importing.value = true
     try {
       const restored = await replaceFacility(imported, Date.now())
