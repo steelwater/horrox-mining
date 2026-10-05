@@ -1,8 +1,9 @@
+import { quantity } from './text'
 import { build, buildLabel } from './build'
 import { formatOperationTime } from './calendar'
 import { createInitialState, findEvent } from './engine'
 import { migrateFacility } from './persistence'
-import type { FacilityState, TranscriptEntry } from './types'
+import type { FacilityState, OperationalEvent, TranscriptEntry } from './types'
 
 export const SAVE_FORMAT = 'horrox-mining-portable-save'
 export const SAVE_SCHEMA = 4
@@ -10,6 +11,19 @@ export const SAVE_SCHEMA = 4
 export function formatTranscript(entries: TranscriptEntry[]): string {
   return [`1st Horrox Mining Ltd. — ${buildLabel}`, ...[...entries].sort((a, b) => a.timestamp - b.timestamp)
     .map((entry) => `[${formatOperationTime(entry.operationAgeMs)}] ${entry.speaker}: ${entry.text}`)].join('\n')
+}
+
+export function formatOperationalHistory(entries: OperationalEvent[]): string {
+  const chronological = [...entries].sort((a, b) => a.operationAgeMs - b.operationAgeMs || a.timestamp - b.timestamp || Number(a.id.replace('op-', '')) - Number(b.id.replace('op-', '')))
+  return [`1st Horrox Mining Ltd. — ${buildLabel}`, 'OPERATIONAL HISTORY', quantity(entries.length, 'event'),
+    ...chronological.map((entry) => [
+      `[${formatOperationTime(entry.operationAgeMs)}]`,
+      `Source: ${entry.source}`,
+      ...(entry.repair && entry.repair.actor !== entry.source ? [`Actor: ${entry.repair.actor}`] : []),
+      `Resolution: ${entry.resolution}`,
+      entry.summary,
+      ...(entry.reason ? [`Reason: ${entry.reason}`] : []),
+    ].join('\n'))].join('\n\n')
 }
 
 export function exportSave(state: FacilityState, now = Date.now()): string {

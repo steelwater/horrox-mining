@@ -8,9 +8,10 @@ export function useTerminalTools(portableSnapshot: () => string, importSnapshot:
   const utilityMessage = ref('')
   const utilityStatus = ref<'success' | 'warning' | 'confirmation'>('success')
   const copying = ref(false)
-  const transcriptText = ref<string | null>(null)
-  const transcriptMessage = ref('')
-  const transcriptStatus = ref<'success' | 'warning'>('success')
+  const copySource = ref<'transcript' | 'history'>('transcript')
+  const copiedText = ref<string | null>(null)
+  const copyMessage = ref('')
+  const copyStatus = ref<'success' | 'warning'>('success')
 
   function openUtility(mode: 'export' | 'import'): void {
     utility.value = mode
@@ -19,18 +20,23 @@ export function useTerminalTools(portableSnapshot: () => string, importSnapshot:
     utilityMessage.value = ''
   }
 
-  async function copyText(text: string, source: 'transcript' | 'save'): Promise<void> {
+  async function copyText(text: string, source: 'transcript' | 'history' | 'save'): Promise<void> {
     if (copying.value) return
     copying.value = true
-    const message = source === 'transcript' ? transcriptMessage : utilityMessage
-    const status = source === 'transcript' ? transcriptStatus : utilityStatus
+    if (source !== 'save') {
+      copySource.value = source
+      copiedText.value = null
+    }
+    const message = source !== 'save' ? copyMessage : utilityMessage
+    const status = source !== 'save' ? copyStatus : utilityStatus
+    message.value = ''
     try {
       await navigator.clipboard.writeText(text)
       status.value = 'success'
-      message.value = `${source === 'transcript' ? 'Transcript' : 'Save'} copied to clipboard.`
+      message.value = `${source === 'transcript' ? 'Transcript' : source === 'history' ? 'Operational history' : 'Save'} copied to clipboard.`
     } catch {
-      if (source === 'transcript') {
-        transcriptText.value = text
+      if (source !== 'save') {
+        copiedText.value = text
       }
       status.value = 'warning'
       message.value = 'Clipboard unavailable. Select and copy the text below manually. Your operation is unchanged.'
@@ -67,14 +73,14 @@ export function useTerminalTools(portableSnapshot: () => string, importSnapshot:
     }
   }
 
-  function closeTranscript(): void {
-    transcriptText.value = null
-    transcriptMessage.value = ''
+  function closeCopy(): void {
+    copiedText.value = null
+    copyMessage.value = ''
   }
 
   return {
     utility, saveText, validatedText, utilityMessage, utilityStatus, copying,
-    transcriptText, transcriptMessage, transcriptStatus,
-    openUtility, copyText, validateImport, confirmImport, closeTranscript,
+    copySource, copiedText, copyMessage, copyStatus,
+    openUtility, copyText, validateImport, confirmImport, closeCopy,
   }
 }

@@ -4,7 +4,7 @@ import { formatOperationTime, operationDate } from './game/calendar'
 import { useFacility } from './composables/useFacility'
 import { useTerminalTools } from './composables/useTerminalTools'
 import { buildLabel } from './game/build'
-import { formatTranscript } from './game/portableSave'
+import { formatOperationalHistory, formatTranscript } from './game/portableSave'
 import type { KeypadKey } from './game/types'
 
 const booting = ref(true)
@@ -35,8 +35,8 @@ const textDisplayVisible = ref(true)
 
 const {
   utility, saveText, validatedText, utilityMessage, utilityStatus, copying,
-  transcriptText, transcriptMessage, transcriptStatus,
-  openUtility, copyText, validateImport, confirmImport, closeTranscript,
+  copySource, copiedText, copyMessage, copyStatus,
+  openUtility, copyText, validateImport, confirmImport, closeCopy,
 } = useTerminalTools(portableSnapshot, importSnapshot)
 const contrastModes = ['high-contrast-white', 'high-contrast-dark'] as const
 const displayLabel = computed(() => displayMode.value.replaceAll('-', ' ').toUpperCase())
@@ -104,21 +104,22 @@ window.setTimeout(() => {
               {{ textDisplayVisible ? 'HIDE TEXT DISPLAY' : 'SHOW TEXT DISPLAY' }}
             </button>
             <button type="button" :disabled="copying || importing" @click="copyText(formatTranscript(state.transcript), 'transcript'); menuOpen = false">{{ copying ? 'COPYING…' : 'COPY TRANSCRIPT' }}</button>
+            <button type="button" :disabled="copying || importing" @click="copyText(formatOperationalHistory(state.operations), 'history'); menuOpen = false">COPY OPERATIONAL HISTORY</button>
             <button type="button" :disabled="copying || importing" @click="openUtility('export'); menuOpen = false">EXPORT SAVE</button>
             <button type="button" :disabled="copying || importing" @click="openUtility('import'); menuOpen = false">IMPORT SAVE</button>
           </div>
         </div>
       </header>
 
-      <p v-if="transcriptMessage" class="utility-message" :class="`utility-${transcriptStatus}`" role="status">
-        <strong>{{ transcriptStatus.toUpperCase() }}: </strong>{{ transcriptMessage }}
+      <p v-if="copyMessage" class="utility-message" :class="`utility-${copyStatus}`" role="status">
+        <strong>{{ copyStatus.toUpperCase() }}: </strong>{{ copyMessage }}
       </p>
-      <section v-if="transcriptText !== null" class="save-tools" aria-label="Copy transcript" @keydown.stop>
-        <label for="transcript-copy">COPYABLE TRANSCRIPT</label>
-        <textarea id="transcript-copy" :value="transcriptText" readonly :disabled="copying" spellcheck="false"></textarea>
+      <section v-if="copiedText !== null" class="save-tools" :aria-label="`Copy ${copySource === 'history' ? 'operational history' : 'transcript'}`" @keydown.stop>
+        <label for="report-copy">COPYABLE {{ copySource === 'history' ? 'OPERATIONAL HISTORY' : 'TRANSCRIPT' }}</label>
+        <textarea id="report-copy" :value="copiedText" readonly :disabled="copying" spellcheck="false"></textarea>
         <div class="terminal-actions">
-          <button :disabled="copying" @click="copyText(transcriptText, 'transcript')">{{ copying ? 'COPYING…' : 'COPY' }}</button>
-          <button :disabled="copying" @click="closeTranscript">CLOSE TRANSCRIPT</button>
+          <button :disabled="copying" @click="copyText(copiedText, copySource)">{{ copying ? 'COPYING…' : 'COPY' }}</button>
+          <button :disabled="copying" @click="closeCopy">CLOSE {{ copySource === 'history' ? 'HISTORY' : 'TRANSCRIPT' }}</button>
         </div>
       </section>
 
@@ -176,11 +177,11 @@ window.setTimeout(() => {
       <section class="terminal-actions" aria-label="Terminal options">
         <button @click.stop="cycleDisplayMode">DISPLAY: {{ displayLabel }}</button>
         <button v-if="onboardingActive" @click="skipOnboarding">DELEGATE CHECKS</button>
-        <button v-else @click="replayOnboarding">REVIEW READINESS</button>
+        <button v-else @click="replayOnboarding">READINESS CHECK</button>
       </section>
 
       <details class="transcript">
-        <summary>TRANSCRIPT // {{ state.transcript.length }} MESSAGES</summary>
+        <summary>TRANSCRIPT // {{ state.transcript.length }} {{ state.transcript.length === 1 ? 'MESSAGE' : 'MESSAGES' }}</summary>
         <ol>
           <li v-for="entry in latestTranscript" :key="entry.id">
             <time :datetime="operationDate(entry.operationAgeMs).toISOString()">{{ formatOperationTime(entry.operationAgeMs) }}</time>
@@ -191,7 +192,7 @@ window.setTimeout(() => {
       </details>
 
       <details class="transcript">
-        <summary>OPERATIONAL HISTORY // {{ state.operations.length }} EVENTS</summary>
+        <summary>OPERATIONAL HISTORY // {{ state.operations.length }} {{ state.operations.length === 1 ? 'EVENT' : 'EVENTS' }}</summary>
         <ol>
           <li v-for="entry in [...state.operations].reverse()" :key="entry.id">
             <time :datetime="operationDate(entry.operationAgeMs).toISOString()">{{ formatOperationTime(entry.operationAgeMs) }}</time>

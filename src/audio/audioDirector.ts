@@ -99,7 +99,7 @@ export class AudioDirector {
     const { priority } = request
     const nativeSpeech = canUseNativeSpeech()
 
-    if (priority < 5 && this.exchangeTimer !== null) this.cancelChatter()
+    if (priority < 5) this.cancelChatter()
     if (this.speaking && this.currentPriority !== null && priority === 1 && this.currentPriority !== 1) {
       this.queue.unshift(request)
       // Preserve interrupted operational context so its answer cannot become orphaned.
