@@ -7,7 +7,7 @@ vi.mock('../src/game/persistence', async (original) => ({ ...await original<type
 vi.mock('vue', async (original) => ({ ...await original<typeof import('vue')>(), onMounted: (callback: () => void) => lifecycle.mounted.push(callback), onBeforeUnmount: (callback: () => void) => lifecycle.unmounted.push(callback) }))
 import { useFacility } from '../src/composables/useFacility'
 import { loadFacility, saveFacility, replaceFacility } from '../src/game/persistence'
-import { commissionFacility, createInitialState } from '../src/game/engine'
+import { commissionFacility, createInitialState, operationalStatus, returnBriefing } from '../src/game/engine'
 import { detectFault } from '../src/game/repairs'
 import { exportSave } from '../src/game/portableSave'
 import { onboardingSteps } from '../src/game/onboarding'
@@ -328,7 +328,7 @@ describe('spoken terminal commands', () => {
     expect(facility.onboardingActive.value).toBe(false)
     expect(speech.speak.mock.calls.flat().join(' ')).not.toContain('Press 9 to enable autopilot.')
     await facility.pressKey('0')
-    expect(speech.speak.mock.calls.at(-1)![0]).toContain('mining vessels active')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Facility not commissioned')
     expect(facility.state.onboardingStep).toBe(9)
     facility.replayOnboarding()
     expect(facility.onboardingActive.value).toBe(true)
@@ -378,7 +378,7 @@ describe('spoken terminal commands', () => {
     await facility.initialize()
     expect(facility.state.commissioned).toBe(false)
     expect(facility.onboardingActive.value).toBe(false)
-    expect(speech.speak).not.toHaveBeenCalled()
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Facility not commissioned')
     facility.replayOnboarding()
     for (const step of onboardingSteps) {
       expect(facility.state.productionCycles).toBe(0)
@@ -474,7 +474,7 @@ describe('spoken terminal commands', () => {
     doc.hidden = true; listeners.visibilitychange!()
     doc.hidden = false; listeners.visibilitychange!()
     expect(facility.onboardingActive.value).toBe(false)
-    expect(speech.speak).not.toHaveBeenCalled()
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Facility not commissioned')
     facility.replayOnboarding()
     expect(facility.state.onboardingStep).toBe(1)
     const imported = createInitialState(Date.now())
@@ -485,6 +485,8 @@ describe('spoken terminal commands', () => {
     expect(facility.onboardingActive.value).toBe(false)
     expect(facility.state.onboardingStep).toBe(7)
     expect(speech.speak).not.toHaveBeenCalled()
+    await facility.pressKey('0')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Facility not commissioned')
     facility.replayOnboarding()
     expect(speech.speak.mock.calls.at(-1)![0]).toContain('Press 8 to acknowledge facility support')
   })
@@ -525,6 +527,74 @@ describe('spoken terminal commands', () => {
     expect(facility.state.transcript).toContainEqual(expect.objectContaining({ text: resume.summary, timestamp: resume.timestamp }))
     expect(facility.state.operations.some((event) => event.summary.includes('returned safely'))).toBe(false)
     expect(facility.state.vessels[0]?.dockingState).toBe('deployed')
+  })
+
+  it.each(['complete', 'delegate'] as const)('explains hours of uncommissioned inactivity, then starts work when checks %s', async (finish) => {
+    vi.useFakeTimers()
+    const start = 1_800_000_000_000
+    vi.setSystemTime(start)
+    const callbacks = new Map<number, () => void>()
+    vi.stubGlobal('window', { setInterval: (callback: () => void, ms: number) => callbacks.set(ms, callback) })
+    const facility = useFacility()
+    await facility.initialize()
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Select Readiness Check')
+    vi.setSystemTime(start + 192 * 3_600_000)
+    callbacks.get(1000)!(); callbacks.get(90_000)!()
+    expect(facility.state.commissioned).toBe(false)
+    expect(facility.onboardingActive.value).toBe(false)
+    expect(facility.state.productionCycles).toBe(0)
+    expect(facility.state.oreProcessed).toBe(0)
+    expect(facility.state.operations).toEqual([])
+    expect(speech.speakExchange).not.toHaveBeenCalled()
+    for (const text of [operationalStatus(facility.state), returnBriefing(facility.state, start, Date.now())]) {
+      expect(text).toContain('Facility not commissioned')
+      expect(text).toContain('Normal operations have not started')
+      expect(text).toContain('Readiness Check')
+      expect(text).not.toMatch(/No intervention is required|No significant operational changes/)
+    }
+    // Normal command keys must not fabricate incidents or authorize commissioning.
+    for (const key of ['0', '3', '9', '#'] as const) await facility.pressKey(key)
+    expect(facility.state.operations).toEqual([])
+    expect(facility.onboardingActive.value).toBe(false)
+    expect(facility.state.autopilotEnabled).toBe(false)
+    facility.replayOnboarding()
+    if (finish === 'delegate') facility.skipOnboarding()
+    else for (const step of onboardingSteps) await facility.pressKey(step.expectedKey)
+    expect(facility.state.commissioned).toBe(true)
+    const deadline = facility.state.vessels[0]!.completesAt
+    facility.replayOnboarding(); facility.skipOnboarding()
+    expect(facility.state.vessels[0]!.completesAt).toBe(deadline)
+    vi.setSystemTime(Date.now() + 90_000)
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0)
+    speech.speakExchange.mockImplementation((lines, onLine) => { onLine(lines[0]); return true })
+    callbacks.get(90_000)!()
+    random.mockRestore()
+    expect(facility.state.operations.some((event) => event.category === 'chatter')).toBe(true)
+    vi.setSystemTime(Date.now() + 54 * 60_000)
+    callbacks.get(1000)!()
+    expect(facility.state.productionCycles).toBeGreaterThan(0)
+    expect(facility.state.oreProcessed).toBeGreaterThan(0)
+    expect(facility.state.operations.some((event) => event.category === 'processing')).toBe(true)
+    expect(operationalStatus(facility.state)).not.toContain('not commissioned')
+  })
+
+  it('continues a commissioned restored save without requiring another readiness check', async () => {
+    vi.useFakeTimers()
+    const start = 1_800_000_000_000
+    const saved = createInitialState(start)
+    commissionFacility(saved, start)
+    saved.onboardingStatus = 'active'; saved.onboardingStep = 5
+    vi.setSystemTime(start + 54 * 60_000)
+    vi.stubGlobal('window', { setInterval: vi.fn() })
+    vi.mocked(loadFacility).mockResolvedValueOnce(saved)
+    const facility = useFacility()
+    await facility.initialize()
+    expect(facility.state.commissioned).toBe(true)
+    expect(facility.onboardingActive.value).toBe(false)
+    expect(facility.state.onboardingStep).toBe(5)
+    expect(facility.state.oreProcessed).toBeGreaterThan(0)
+    expect(facility.state.operations.length).toBeGreaterThan(0)
+    expect(speech.speak.mock.calls.flat().join(' ')).not.toContain('Facility not commissioned')
   })
 
 })

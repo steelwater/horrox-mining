@@ -375,7 +375,10 @@ export function advanceFacility(state: FacilityState, now: number): void {
   state.lastProcessedAt = now
 }
 
+export const COMMISSIONING_NOTICE = 'Facility not commissioned. Normal operations have not started, so no operational events are generated. Select Readiness Check to start or resume commissioning, then complete or delegate the checks.'
+
 export function operationalStatus(state: FacilityState): string {
+  if (!state.commissioned) return COMMISSIONING_NOTICE
   const active = state.vessels.filter((v) => v.assignment === 'extraction').length
   const docked = state.vessels.filter((v) => v.dockingState === 'docked').length
   const travelling = state.vessels.length - active - docked
@@ -389,6 +392,7 @@ export function operationalStatus(state: FacilityState): string {
 }
 
 export function shouldBriefOnReturn(state: FacilityState, since: number, now: number, previousOperationId: number): boolean {
+  if (!state.commissioned) return true
   const warnings = state.vessels.some((vessel) => activeFaults(vessel).length > 0)
     || state.repairDrones.some((drone) => drone.maintenanceDue)
     || state.systems.berth === 'isolated' || state.systems.coolant === 'inspection' || state.systems.scanner === 'manual-sampling'
@@ -422,6 +426,7 @@ export function recordAbsenceTranscript(state: FacilityState, previousOperationI
 }
 
 export function returnBriefing(state: FacilityState, since: number, now: number): string {
+  if (!state.commissioned) return `Captain terminal connected. ${COMMISSIONING_NOTICE}`
   const requests = pendingFaults(state)
   const pendingRepair = requests.find(({ fault }) => fault.emergency) ?? requests[0]
   if (pendingRepair) {
