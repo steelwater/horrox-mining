@@ -7,7 +7,7 @@ vi.mock('../src/game/persistence', async (original) => ({ ...await original<type
 vi.mock('vue', async (original) => ({ ...await original<typeof import('vue')>(), onMounted: (callback: () => void) => lifecycle.mounted.push(callback), onBeforeUnmount: (callback: () => void) => lifecycle.unmounted.push(callback) }))
 import { useFacility } from '../src/composables/useFacility'
 import { loadFacility, saveFacility, replaceFacility } from '../src/game/persistence'
-import { commissionFacility, createInitialState, operationalStatus, returnBriefing } from '../src/game/engine'
+import { commissionFacility, createInitialState, operationalStatus, returnBriefing, restoreState } from '../src/game/engine'
 import { detectFault } from '../src/game/repairs'
 import { exportSave } from '../src/game/portableSave'
 import { onboardingSteps } from '../src/game/onboarding'
@@ -595,6 +595,34 @@ describe('spoken terminal commands', () => {
     expect(facility.state.oreProcessed).toBeGreaterThan(0)
     expect(facility.state.operations.length).toBeGreaterThan(0)
     expect(speech.speak.mock.calls.flat().join(' ')).not.toContain('Facility not commissioned')
+  })
+
+  it.each(['restore', 'import'] as const)('discards an unissued legacy request on %s before commissioning without erasing history', async (path) => {
+    vi.useFakeTimers()
+    const start = 1_800_000_000_000
+    vi.setSystemTime(start + 3 * 3_600_000)
+    vi.stubGlobal('window', { setInterval: vi.fn() })
+    const saved = createInitialState(start)
+    saved.pendingEvent = { eventId: 'mining-vein-choice', requestedAt: start }
+    saved.history = ['Prior precommissioning record.']
+    saved.onboardingStatus = 'active'; saved.onboardingStep = 4
+    if (path === 'restore') vi.mocked(loadFacility).mockResolvedValueOnce(saved)
+    const facility = useFacility()
+    await facility.initialize()
+    if (path === 'import') {
+      vi.mocked(replaceFacility).mockImplementationOnce(async (value, at) => restoreState(value, at).state)
+      await facility.importSnapshot(exportSave(saved, start))
+    }
+    expect(facility.state.pendingEvent).toBeNull()
+    expect(facility.state.history).toEqual(saved.history)
+    expect(facility.state.operations).toEqual([])
+    expect(facility.state.onboardingStep).toBe(4)
+    expect(facility.onboardingActive.value).toBe(false)
+    facility.replayOnboarding(); facility.skipOnboarding()
+    await facility.pressKey('0')
+    expect(facility.state.pendingEvent).toBeNull()
+    expect(facility.state.operations).toEqual([])
+    expect(facility.state.history).toEqual(saved.history)
   })
 
 })

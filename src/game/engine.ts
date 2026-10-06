@@ -105,6 +105,9 @@ export function createInitialState(now: number): FacilityState {
 
 export function restoreState(saved: FacilityState, now: number): { state: FacilityState; elapsedMs: number; completedCycles: number } {
   const state = JSON.parse(JSON.stringify(saved)) as FacilityState
+  // Older terminals could open requests before commissioning, when their
+  // response clocks could not run. They are not valid work to replay later.
+  if (!state.commissioned) state.pendingEvent = null
   const elapsedMs = safeElapsed(saved.lastActiveAt, now)
   const before = state.productionCycles
   advanceFacility(state, now)
