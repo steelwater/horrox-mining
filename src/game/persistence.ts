@@ -70,6 +70,7 @@ export function migrateFacility(raw: unknown, now: number): FacilityState {
         cargo: Math.min(16, count(prior.cargo, 0)),
         delivered: count(prior.delivered, 0),
         run: Math.floor(count(prior.run, vessel.run)),
+        runsSinceService: Math.floor(count(prior.runsSinceService, count(prior.operatingRuns, Math.max(0, count(prior.run, 1) - 1)) % 4)),
         miningProgress: Math.min(1, count(prior.miningProgress, 0)),
         cut: choice(prior.cut, ['stable', 'dense'], 'stable'),
       }

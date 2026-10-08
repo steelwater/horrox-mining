@@ -502,6 +502,7 @@ describe('spoken terminal commands', () => {
     facility.skipOnboarding()
     facility.state.nextRepairId = 2
     facility.state.vessels[0]!.run = 4
+    facility.state.vessels[0]!.runsSinceService = 3
     vi.setSystemTime(start + 15 * 60_000); callbacks.get(1000)!()
     speech.speak.mockClear()
     vi.setSystemTime(start + 17 * 60_000); callbacks.get(1000)!()

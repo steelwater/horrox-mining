@@ -77,8 +77,8 @@ export function createInitialState(now: number): FacilityState {
     lastActiveAt: now,
     miners: JSON.parse(JSON.stringify(miners)),
     vessels: [
-      { id: 'excavator-03', name: 'Excavator Three', minerId: 'sol-arden', condition: 'nominal', routineServiceDue: false, activeFaults: [], serviceHistory: [], operatingRuns: 0, lastFaultRun: 0, resumeAfterRepair: false, dockingState: 'docked', assignment: 'standby', startedAt: now, completesAt: null, cargo: 0, delivered: 0, run: 1, miningProgress: 0, cut: 'stable' },
-      { id: 'hauler-02', name: 'Hauler Two', minerId: 'mara-vale', condition: 'nominal', routineServiceDue: false, activeFaults: [], serviceHistory: [], operatingRuns: 0, lastFaultRun: 0, resumeAfterRepair: false, dockingState: 'holding', assignment: 'standby', startedAt: now, completesAt: null, cargo: 0, delivered: 0, run: 0, miningProgress: 0, cut: 'stable' },
+      { id: 'excavator-03', name: 'Excavator Three', minerId: 'sol-arden', condition: 'nominal', routineServiceDue: false, runsSinceService: 0, activeFaults: [], serviceHistory: [], operatingRuns: 0, lastFaultRun: 0, resumeAfterRepair: false, dockingState: 'docked', assignment: 'standby', startedAt: now, completesAt: null, cargo: 0, delivered: 0, run: 1, miningProgress: 0, cut: 'stable' },
+      { id: 'hauler-02', name: 'Hauler Two', minerId: 'mara-vale', condition: 'nominal', routineServiceDue: false, runsSinceService: 0, activeFaults: [], serviceHistory: [], operatingRuns: 0, lastFaultRun: 0, resumeAfterRepair: false, dockingState: 'holding', assignment: 'standby', startedAt: now, completesAt: null, cargo: 0, delivered: 0, run: 0, miningProgress: 0, cut: 'stable' },
     ],
     repairDrones: [{ id: 'dr-01', name: 'Repair Drone One', targetId: null, completesAt: null, state: 'available', location: 'facility', assignedJobId: null, transitStartedAt: null, serviceStartedAt: null, maintenanceDue: false, serviceHistory: [] }],
     repairJobs: [],
@@ -285,7 +285,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
         vessel.dockingState = activeFaults(vessel).length ? 'docked' : 'deployed'
         vessel.startedAt = at
         vessel.completesAt = vessel.assignment === 'extraction' ? at + extractionDuration(vessel.cut) : null
-        vessel.run++
+        vessel.runsSinceService = 0
         routine(state, at, drone.id, 'maintenance', `${drone.id.toUpperCase()} completed routine service on ${vessel.name}. ${activeFaults(vessel).length ? 'Vessel remains held for fault repair.' : 'Extraction resumed.'}`, [drone.id, vessel.id], 'Routine service completed before redeployment.', 245)
       }
       drone.targetId = null
@@ -303,6 +303,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
         vessel.startedAt = at
         vessel.completesAt = at + TRANSIT_MS
         state.productionCycles++
+        vessel.runsSinceService++
         detectOperationalWear(state, vessel, 'extraction', at)
         const canDeliver = miningEfficiency(vessel) > 0
         routine(state, at, vessel.minerId, 'mining', `${vessel.name} completed extraction run ${vessel.run}. ${canDeliver ? `Returning with ${vessel.cargo} tonnes.` : `Holding ${vessel.cargo} tonnes safely pending repair.`}`, [vessel.id, vessel.minerId], canDeliver ? 'The assigned run is complete. Crew is delivering the cargo.' : 'The assigned run is complete; unsafe transit is suspended.', 112)
@@ -322,15 +323,16 @@ export function advanceFacility(state: FacilityState, now: number): void {
         if (tonnes > 0) state.processingQueue.push({ id: `${vessel.id}-run-${vessel.run}`, vesselId: vessel.id, tonnes, completesAt: startsAt + PROCESSING_MS })
         routine(state, at, vessel.minerId, 'docking', tonnes > 0 ? `${vessel.name} delivered ${tonnes} tonnes to Processor One.` : `${vessel.name} returned safely. Preparing the next assignment.`, [vessel.id, 'processor-01'], 'Cargo transferred before the next assignment.', 165)
         vessel.miningProgress = 0
-        // A routine service stop every fourth run; no damage is caused by absence.
-        if (vessel.routineServiceDue || vessel.run % 4 === 0 || activeFaults(vessel).some((f) => f.action !== 'continue')) {
-          vessel.routineServiceDue ||= vessel.run % 4 === 0
+        // Advance once at unload, including when the next assignment is held for service.
+        if (tonnes > 0) vessel.run++
+        // A routine service stop after four runs since the last inspection; no damage is caused by absence.
+        if (vessel.routineServiceDue || vessel.runsSinceService >= 4 || activeFaults(vessel).some((f) => f.action !== 'continue')) {
+          vessel.routineServiceDue ||= vessel.runsSinceService >= 4
           vessel.resumeAfterRepair ||= activeFaults(vessel).length > 0
           vessel.assignment = 'standby'
           vessel.dockingState = 'docked'
           vessel.completesAt = null
         } else {
-          vessel.run++
           vessel.assignment = 'extraction'
           vessel.dockingState = 'deployed'
           vessel.startedAt = at
@@ -382,16 +384,18 @@ export const COMMISSIONING_NOTICE = 'Facility not commissioned. Normal operation
 
 export function operationalStatus(state: FacilityState): string {
   if (!state.commissioned) return COMMISSIONING_NOTICE
-  const active = state.vessels.filter((v) => v.assignment === 'extraction').length
+  const active = state.vessels.filter((v) => v.assignment === 'extraction' && v.dockingState === 'deployed').length
   const docked = state.vessels.filter((v) => v.dockingState === 'docked').length
-  const travelling = state.vessels.length - active - docked
+  const moving = state.vessels.filter((v) => ['returning', 'approaching'].includes(v.dockingState))
+  const holding = state.vessels.filter((v) => v.dockingState === 'holding')
+  const standby = state.vessels.length - active - docked - moving.length - holding.length
   const assigned = state.repairDrones.filter((d) => d.targetId !== null).length
   const available = state.repairDrones.filter((d) => d.state === 'available' && !d.maintenanceDue).length
   const warnings = [state.systems.berth === 'isolated' ? 'Berth Four isolated.' : '', state.systems.coolant === 'inspection' ? 'Coolant inspection in progress.' : '', state.systems.scanner === 'manual-sampling' ? 'Manual sampling active during scanner calibration.' : ''].filter(Boolean)
   const faults = state.vessels.flatMap((v) => activeFaults(v).map((f) => vesselRepairStatus(state, v, f))).join(' ')
   const service = state.vessels.filter((v) => v.routineServiceDue).map((v) => `${v.name}: ${state.repairDrones.some((d) => d.targetId === v.id && d.state === 'servicing' && d.assignedJobId === null) ? 'routine service in progress; work suspended' : 'routine service scheduled after safe cargo delivery'}.`).join(' ')
   const requests = (state.pendingEvent ? 1 : 0) + pendingFaults(state).length
-  return `${faults ? `${faults} ` : ''}${service ? `${service} ` : ''}${quantity(active, 'mining vessel')} active. ${docked} docked. ${travelling} in transit or holding. ${quantity(requests, 'crew request')} awaiting attention. ${quantity(assigned, 'repair drone')} assigned. ${available} available. Processor One has ${quantity(state.processingQueue.length, 'queued load')}. ${warnings.join(' ') || 'No major facility warnings.'} ${requests ? `${quantity(requests, 'decision')} pending.` : 'No decisions pending.'} ${droneStatus(state)}`
+  return `${faults ? `${faults} ` : ''}${service ? `${service} ` : ''}${quantity(active, 'mining vessel')} active. ${docked} docked. ${moving.length} in transit${moving.length ? ` (${moving.map((v) => v.name).join(', ')})` : ''}. ${holding.length} holding${holding.length ? ` (${holding.map((v) => v.name).join(', ')})` : ''}.${standby ? ` ${standby} on standby.` : ''} ${quantity(requests, 'crew request')} awaiting attention. ${quantity(assigned, 'repair drone')} assigned. ${available} available. Processor One has ${quantity(state.processingQueue.length, 'queued load')}. ${warnings.join(' ') || 'No major facility warnings.'} ${requests ? `${quantity(requests, 'decision')} pending.` : 'No decisions pending.'} ${droneStatus(state)}`
 }
 
 export function shouldBriefOnReturn(state: FacilityState, since: number, now: number, previousOperationId: number): boolean {

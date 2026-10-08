@@ -59,7 +59,7 @@ export function detectFault(state: FacilityState, vesselId: string, type: FaultT
   const definition = faultLibrary[type]
   const before = vessel.condition
   const previousEfficiency = miningEfficiency(vessel)
-  const fault: VesselFault = { id: `fault-${state.nextRepairId++}`, type, severity: definition.severity, detectedAt: at, decisionAt: at + CAPTAIN_TIMEOUT_MS, escalatesAt: null, resolvedAt: null, action: null, operationCode: 205, emergency: definition.severity === 'critical' }
+  const fault: VesselFault = { id: `fault-${state.nextRepairId++}`, type, severity: definition.severity, detectedAt: at, decisionAt: definition.severity === 'critical' ? null : at + CAPTAIN_TIMEOUT_MS, escalatesAt: null, resolvedAt: null, action: null, operationCode: 205, emergency: definition.severity === 'critical' }
   vessel.activeFaults.push(fault)
   recalculateCondition(vessel)
   if (!miningEfficiency(vessel)) hold(vessel)
@@ -69,6 +69,7 @@ export function detectFault(state: FacilityState, vesselId: string, type: FaultT
   if (fault.severity === 'degraded' && ['extraction', 'delivery'].includes(vessel.assignment)) fault.escalatesAt = at + 30 * MINUTE
   const requester = type === 'communications-failure' ? undefined : state.miners.find((miner) => miner.id === vessel.minerId)
   log(state, vessel, fault, at, definition.operationCode, `${requester ? `Control, ${requester.callsign} requesting service for ${vessel.name}.` : `${vessel.name}: telemetry reports a service requirement.`} ${definition.name}. Condition ${vessel.condition.toUpperCase()}. ${definition.diagnostics} Press 3 for vessel support; 1 for urgent incidents.`, requester?.id ?? 'facility', null, 'Equipment reports an operational fault; unsafe work is suspended immediately.', undefined, before)
+  if (fault.emergency) decideRepair(state, vessel, fault, recommendation(state, vessel, fault).action, at, 'facility')
   return fault
 }
 
@@ -134,7 +135,7 @@ export function decideRepair(state: FacilityState, vessel: Vessel, fault: Vessel
   if (activeJob(state, fault)) return vesselRepairStatus(state, vessel, fault)
   if (action === 'continue' && (miningEfficiency(vessel) === 0 || !['deployed', 'returning'].includes(vessel.dockingState))) return 'Continued work is not safe. Request the Facility recommendation.'
   if ((action === 'dock' || action === 'safe-return') && vessel.dockingState !== 'docked' && !canReturn(vessel)) return 'Self-powered return is unavailable. Request drone recovery.'
-  const reason = action === 'crew' ? `${actor === 'facility' ? 'The response window elapsed. ' : 'Captain delegated the decision. '}${recommendation(state, vessel, fault).text}` : 'Captain selected the operational response.'
+  const reason = action === 'crew' ? `${actor === 'facility' ? 'The response window elapsed. ' : 'Captain delegated the decision. '}${recommendation(state, vessel, fault).text}` : actor === 'facility' ? 'CRITICAL condition: Facility Control initiated the predefined safe response immediately.' : 'Captain selected the operational response.'
   if (action === 'crew') { action = recommendation(state, vessel, fault).action; actor = 'facility' }
   fault.action = action
   fault.decisionAt = null
@@ -163,15 +164,20 @@ export function decideRepair(state: FacilityState, vessel: Vessel, fault: Vessel
 
 function startReturn(state: FacilityState, job: RepairJob, vessel: Vessel, fault: VesselFault, at: number): void {
   job.state = 'returning-vessel'
-  job.nextAt = at + TRAVEL_MS
-  vessel.dockingState = 'returning'
+  const alreadyDocked = vessel.dockingState === 'docked'
+  job.nextAt = alreadyDocked ? at : at + TRAVEL_MS
+  if (!alreadyDocked) vessel.dockingState = 'returning'
   const drone = state.repairDrones.find((d) => d.id === job.assignedDroneId)
   if (drone) { drone.state = 'in-transit'; drone.location = `recovering ${vessel.name} to facility`; drone.transitStartedAt = at }
-  log(state, vessel, fault, at, fault.emergency ? 325 : 240, `${vessel.name} returning for dock service. ${job.assignedDroneId ? 'Repair drone providing recovery guidance and tow.' : 'Beacon-guided return authorized.'}`, 'facility', null, 'Return before resuming work.', job)
+  log(state, vessel, fault, at, 240, `${vessel.name} ${alreadyDocked ? 'already at the facility; confirming safe arrival for dock service' : 'returning for dock service'}. ${alreadyDocked ? 'Return leg already complete.' : job.assignedDroneId ? 'Repair drone providing recovery guidance and tow.' : 'Beacon-guided return authorized.'}`, 'facility', null, 'Return before resuming work.', job)
+}
+
+function priority(state: FacilityState, job: RepairJob): number {
+  return Number(state.vessels.find((v) => v.id === job.vesselId)!.activeFaults.find((f) => f.id === job.faultId)!.emergency)
 }
 
 export function scheduleRepairs(state: FacilityState, at: number): void {
-  for (const job of state.repairJobs.filter((j) => j.state === 'waiting')) {
+  for (const job of state.repairJobs.filter((j) => j.state === 'waiting').sort((a, b) => priority(state, b) - priority(state, a))) {
     const vessel = state.vessels.find((v) => v.id === job.vesselId)!
     const fault = vessel.activeFaults.find((f) => f.id === job.faultId)!
     // One vessel cannot be moved by two concurrent jobs.
@@ -187,12 +193,10 @@ export function scheduleRepairs(state: FacilityState, at: number): void {
       job.state = 'dispatched'
       job.nextAt = at + 1_000
       log(state, vessel, fault, at, 220, `${drone.name} assigned to ${vessel.name}.`, 'facility', null, 'Drone reserved until return and required maintenance are complete.', job)
-    } else if (vessel.dockingState !== 'docked') {
+    } else {
       // Another simultaneous fault may have removed self-return capability.
-      if (!canReturn(vessel)) { job.method = 'remote-drone'; scheduleRepairs(state, at); continue }
+      if (vessel.dockingState !== 'docked' && !canReturn(vessel)) { job.method = 'remote-drone'; scheduleRepairs(state, at); continue }
       startReturn(state, job, vessel, fault, at)
-    } else if (state.systems.berth === 'open' && !state.repairJobs.some((j) => j.id !== job.id && j.method === 'dock' && ['servicing', 'docking'].includes(j.state))) {
-      startService(state, job, vessel, fault, at)
     }
   }
 }
@@ -209,10 +213,11 @@ export function repairDeadlines(state: FacilityState): number[] {
 }
 export function advanceRepairs(state: FacilityState, at: number): void {
   for (const vessel of state.vessels) for (const fault of activeFaults(vessel)) {
+    if (fault.severity === 'critical' && !activeJob(state, fault)) decideRepair(state, vessel, fault, recommendation(state, vessel, fault).action, at, 'facility')
     if (fault.escalatesAt !== null && fault.escalatesAt <= at) escalateFault(state, vessel, fault, at)
     if (fault.decisionAt !== null && fault.decisionAt <= at) decideRepair(state, vessel, fault, 'crew', at, 'facility')
   }
-  for (const job of state.repairJobs) {
+  for (const job of [...state.repairJobs].sort((a, b) => priority(state, b) - priority(state, a))) {
     if (job.nextAt === null || job.nextAt > at) continue
     const vessel = state.vessels.find((v) => v.id === job.vesselId)!
     const fault = vessel.activeFaults.find((f) => f.id === job.faultId)!
@@ -222,15 +227,19 @@ export function advanceRepairs(state: FacilityState, at: number): void {
       if (drone) { drone.state = 'in-transit'; drone.transitStartedAt = at; drone.location = 'transit to vessel' }
       log(state, vessel, fault, at, 225, `${drone?.name} dispatched to ${vessel.name}. Arrival in two minutes.`, 'facility', null, 'Reserved drone launched.', job)
     } else if (job.state === 'in-transit') {
-      if (!faultLibrary[fault.type].locations.includes('remote-drone')) { job.method = 'dock'; startReturn(state, job, vessel, fault, at) }
-      else startService(state, job, vessel, fault, at)
+      if (!faultLibrary[fault.type].locations.includes('remote-drone')) {
+        job.method = 'dock'
+        log(state, vessel, fault, at, 235, `${vessel.name}: dockside repair required after drone recovery.`, 'facility', null, 'This subsystem requires dockside service.', job)
+        startReturn(state, job, vessel, fault, at)
+      } else startService(state, job, vessel, fault, at)
     } else if (job.state === 'returning-vessel') {
-      vessel.dockingState = 'approaching'
+      const alreadyDocked = vessel.dockingState === 'docked'
+      if (!alreadyDocked) vessel.dockingState = 'approaching'
       job.state = 'docking'; job.nextAt = at + DOCKING_MS
-      log(state, vessel, fault, at, 125, `${vessel.name} approaching Berth Four for service.`, 'facility', null, 'Approach remains subject to berth clearance.', job)
+      log(state, vessel, fault, at, 125, `${vessel.name} ${alreadyDocked ? 'approach already complete; confirming docking safety at Berth Four' : 'approaching Berth Four for service'}.`, 'facility', null, 'Approach remains subject to berth clearance.', job)
     } else if (job.state === 'docking') {
       if (state.systems.berth !== 'open' || state.repairJobs.some((j) => j.id !== job.id && j.method === 'dock' && j.state === 'servicing')) {
-        vessel.dockingState = 'holding'
+        if (vessel.dockingState !== 'docked') vessel.dockingState = 'holding'
         job.nextAt = Math.max(at + MINUTE, state.systems.berthInspectionAt ?? 0)
       } else {
         vessel.dockingState = 'docked'
@@ -242,6 +251,8 @@ export function advanceRepairs(state: FacilityState, at: number): void {
       job.state = 'complete'; job.nextAt = null; job.completedAt = at; job.outcome = 'restored'
       fault.resolvedAt = at; fault.decisionAt = null; fault.escalatesAt = null
       vessel.serviceHistory = [...vessel.serviceHistory, job.id].slice(-100)
+      vessel.runsSinceService = 0
+      vessel.routineServiceDue = false
       recalculateCondition(vessel)
       if (drone) {
         drone.state = 'returning'; drone.location = 'return transit'; drone.transitStartedAt = at
@@ -254,14 +265,10 @@ export function advanceRepairs(state: FacilityState, at: number): void {
       if (!activeFaults(vessel).length && vessel.resumeAfterRepair) {
         vessel.resumeAfterRepair = false
         vessel.startedAt = at
-        if (vessel.cargo > 0 || vessel.routineServiceDue) {
-          // Cargo and scheduled service still require a real return/unload phase.
-          if (vessel.dockingState === 'docked' && vessel.cargo === 0) {
-            vessel.assignment = 'standby'; vessel.completesAt = null
-          } else {
-            vessel.assignment = 'delivery'; vessel.completesAt = at + TRAVEL_MS
-            if (vessel.dockingState !== 'docked') vessel.dockingState = 'returning'
-          }
+        if (vessel.cargo > 0) {
+          // Corrective inspection reset routine service; retained cargo still needs unloading.
+          vessel.assignment = 'delivery'; vessel.completesAt = at + TRAVEL_MS
+          if (vessel.dockingState !== 'docked') vessel.dockingState = 'returning'
         } else {
           const remote = vessel.dockingState !== 'docked'
           vessel.assignment = 'extraction'; vessel.dockingState = 'deployed'

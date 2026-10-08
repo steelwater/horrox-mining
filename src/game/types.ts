@@ -99,6 +99,7 @@ export type Vessel = {
   minerId: string
   condition: VesselCondition
   routineServiceDue: boolean
+  runsSinceService: number
   activeFaults: VesselFault[]
   serviceHistory: string[]
   operatingRuns: number
