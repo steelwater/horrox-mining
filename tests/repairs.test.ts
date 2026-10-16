@@ -161,17 +161,17 @@ describe('repair resources and lifecycle', () => {
     expect(vessel.cargo).toBe(12)
     expect(vessel.delivered).toBe(0)
     expect(state.processingQueue).toHaveLength(0)
-    advanceFacility(state, start + 28 * minute - 1)
+    advanceFacility(state, start + 27 * minute - 1)
     expect(vessel.assignment).toBe('standby')
     expect(vessel.cargo).toBe(12)
     expect(vessel.delivered).toBe(0)
-    advanceFacility(state, start + 28 * minute)
+    advanceFacility(state, start + 27 * minute)
     expect(vessel.condition).toBe('nominal')
     expect(vessel.assignment).toBe('delivery')
-    advanceFacility(state, start + 30 * minute)
+    advanceFacility(state, start + 29 * minute)
     expect(vessel.delivered).toBe(12)
     expect(vessel.assignment).toBe('extraction')
-    advanceFacility(offline, start + 30 * minute)
+    advanceFacility(offline, start + 29 * minute)
     expect(offline).toEqual(state)
     const complete = state.operations.find((event) => event.operationCode === 245 && event.repair)!
     const delivery = state.operations.find((event) => event.operationCode === 165)!
@@ -322,13 +322,13 @@ describe('post-repair continuity', () => {
     vessel.operatingRuns = 48
     vessel.routineServiceDue = true
     vessel.runsSinceService = 4
-    advanceFacility(state, start + 28 * minute)
+    advanceFacility(state, start + 27 * minute)
     expect(vessel.assignment).toBe('delivery')
     expect(vessel.dockingState).toBe('docked')
     expect(vessel.cargo).toBe(12)
     expect(vessel.routineServiceDue).toBe(false)
     expect(vessel.runsSinceService).toBe(0)
-    advanceFacility(state, start + 30 * minute)
+    advanceFacility(state, start + 29 * minute)
     expect(vessel.delivered).toBe(12)
     expect(vessel.assignment).toBe('extraction')
     expect(state.repairDrones[0]?.state).toBe('available')

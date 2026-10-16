@@ -432,8 +432,28 @@ export function recordAbsenceTranscript(state: FacilityState, previousOperationI
   }))].slice(-80)
 }
 
+function longAbsenceSummary(state: FacilityState, since: number, now: number): string {
+  const recent = state.operations.filter((event) => event.timestamp > since && event.timestamp <= now && event.category !== 'chatter')
+  const runs = recent.filter((event) => event.operationCode === 112).length
+  // Existing saved reports are the durable source for interval totals, including older saves.
+  const delivered = recent.filter((event) => event.operationCode === 165).reduce((sum, event) => sum + Number(event.summary.match(/delivered (\d+(?:\.\d+)?) tonnes/)?.[1] ?? 0), 0)
+  const processed = recent.filter((event) => event.category === 'processing').reduce((sum, event) => sum + Number(event.summary.match(/completed a (\d+(?:\.\d+)?) tonne load/)?.[1] ?? 0), 0)
+  const repairs = new Set(recent.filter((event) => event.operationCode === 245 && event.repair).map((event) => event.repair!.jobId)).size
+  const services = recent.filter((event) => event.operationCode === 245 && !event.repair).length
+  const faults = new Set(recent.filter((event) => event.repair && event.repair.detectedAt > since).map((event) => event.repair!.faultId)).size
+  const critical = new Set(recent.filter((event) => event.repair?.severity === 'critical' && event.repair.detectedAt > since).map((event) => event.repair!.faultId)).size
+  const inspections = recent.filter((event) => event.category === 'maintenance' && !event.repair && event.operationCode === undefined && /inspection complete|calibration complete/.test(event.summary)).length
+  const decisions = recent.filter((event) => event.actionRequested && event.resolution === 'manual' && !['diagnostics', 'recommend'].includes(event.repair?.action ?? '')).length
+  const autonomous = recent.filter((event) => event.actionRequested && event.resolution === 'autonomous' && (!event.repair || event.repair.action !== null)).length
+  const requests = pendingFaults(state).length + Number(state.pendingEvent !== null)
+  const partial = state.nextOperationId > state.operations.length + 1 && (state.operations[0]?.timestamp ?? 0) > since
+  const minutes = Math.floor((now - since) / 60_000)
+  return `Captain terminal connected. Elapsed since last connection: ${quantity(Math.floor(minutes / 60), 'hour')} and ${quantity(minutes % 60, 'minute')}. ${now - since > MAX_CATCHUP_MS ? 'Catch-up is limited to seven days of operations. ' : ''}${partial ? 'History retention covers only part of this absence; the following totals cover retained records. ' : 'During your absence: '}${quantity(runs, 'extraction run')} completed; ${delivered} tonnes delivered; ${processed} tonnes processed. ${quantity(repairs, 'corrective repair')} and ${quantity(services, 'routine service')} completed. ${quantity(inspections, 'facility inspection')} completed. ${quantity(faults, 'vessel fault')} reported (${critical} critical); ${quantity(decisions, 'captain decision')}; ${quantity(autonomous, 'autonomous response')}. ${requests ? `${quantity(requests, 'request')} awaiting your decision. ${pendingFaults(state).length ? 'Press 3 for vessel support. ' : ''}${state.pendingEvent ? 'Press 0 for the crew request. ' : ''}` : 'No captain decision is pending. '}Current state: ${operationalStatus(state)} Operational history contains the detailed chronology.`
+}
+
 export function returnBriefing(state: FacilityState, since: number, now: number): string {
   if (!state.commissioned) return `Captain terminal connected. ${COMMISSIONING_NOTICE}`
+  if (Number.isFinite(since) && now - since >= 30 * 60_000) return longAbsenceSummary(state, since, now)
   const requests = pendingFaults(state)
   const pendingRepair = requests.find(({ fault }) => fault.emergency) ?? requests[0]
   if (pendingRepair) {

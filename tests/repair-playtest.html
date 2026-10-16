@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><title>Milestone 3 local playtest</title>
 <style>body{font:16px system-ui;background:#eee;color:#111}button,select{padding:10px;margin:4px}iframe{display:block;border:1px solid #888;height:844px;max-width:100%}p{max-width:800px}</style></head>
 <body><h1>Milestone 3 local playtest</h1><p>Development fixture only. Use a dedicated localhost port with disposable storage. Scenario buttons replace only the test origin’s save. The embedded terminal is the real app.</p>
-<select id="scenario" aria-label="Scenario"><option value="normal-request">Normal crew request in five seconds</option><option value="drill-wear">A — Degraded drill</option><option value="sensor-degradation">B — Remote sensor repair</option><option value="thruster-malfunction">C — Unattended thruster fault</option><option value="disabled">D — Disabled vessel</option><option value="competing">E — Competing repair demand</option><option value="away">F — Return after absence</option><option value="hull-damage">Dock repair</option></select>
+<select id="scenario" aria-label="Scenario"><option value="normal-request">Normal crew request in five seconds</option><option value="drill-wear">A — Degraded drill</option><option value="sensor-degradation">B — Remote sensor repair</option><option value="thruster-malfunction">C — Unattended thruster fault</option><option value="disabled">D — Disabled vessel</option><option value="competing">E — Competing repair demand</option><option value="away">F — Return after absence</option><option value="hull-damage">Dock repair</option><option value="docked-drill">Already-docked drill repair</option><option value="long-absence">Two-hour unattended operation</option></select>
 <button id="load">Load scenario</button><button id="advance">Advance 20 minutes and reload</button><button id="phone">Phone 390px</button><button id="tablet">Tablet 800px</button><p id="result" role="status">No scenario loaded.</p><label><input id="block-clipboard" type="checkbox"> Simulate unavailable clipboard</label><iframe title="Real Horrox terminal" id="terminal" width="390"></iframe>
 <script type="module">
 import { createInitialState, commissionFacility, advanceFacility } from '/src/game/engine.ts'
@@ -26,13 +26,14 @@ document.querySelector('#load').onclick = async () => {
   await new Promise(resolve => frame.onload = resolve)
   const scenario = document.querySelector('#scenario').value
   const now = Date.now()
-  const began = scenario === 'normal-request' ? now - 115_000 : now
+  const began = scenario === 'normal-request' ? now - 115_000 : scenario === 'long-absence' ? now - 120 * 60_000 : now
   const state = createInitialState(began)
   commissionFacility(state, began)
   state.onboardingStatus = 'complete'
   const vessel = state.vessels[0]
   if (scenario === 'normal-request') advanceFacility(state, now)
-  const fault = scenario === 'normal-request' ? null : detectFault(state, vessel.id, scenario === 'disabled' ? 'thruster-malfunction' : ['competing', 'away'].includes(scenario) ? 'sensor-degradation' : scenario, now)
+  if (scenario === 'docked-drill') { vessel.dockingState = 'docked'; vessel.assignment = 'standby'; vessel.completesAt = null; vessel.resumeAfterRepair = true }
+  const fault = ['normal-request', 'long-absence'].includes(scenario) ? null : detectFault(state, vessel.id, scenario === 'docked-drill' ? 'drill-wear' : scenario === 'disabled' ? 'thruster-malfunction' : ['competing', 'away'].includes(scenario) ? 'sensor-degradation' : scenario, now)
   if (scenario === 'disabled') escalateFault(state, vessel, fault, now, true)
   if (scenario === 'competing' || scenario === 'away') decideRepair(state, vessel, fault, 'drone', now)
   if (scenario === 'competing') detectFault(state, state.vessels[1].id, 'thruster-malfunction', now)

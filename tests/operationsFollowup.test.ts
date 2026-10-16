@@ -40,24 +40,25 @@ describe('Playtest 1007 operations follow-up', () => {
     expect(vessel.runsSinceService).toBe(1)
   })
 
-  it.each(['remote', 'docked'] as const)('confirms arrival and docking before %s dock repair, retaining its service duration', (location) => {
+  it.each(['remote', 'docked'] as const)('uses only real arrival transitions for %s dock repair, retaining its service duration', (location) => {
     const state = operation()
     const vessel = state.vessels[0]!
     if (location === 'docked') vessel.dockingState = 'docked'
     detectFault(state, vessel.id, 'hull-damage', start)
     const job = state.repairJobs[0]!
     expect(job.createdAt).toBe(start)
-    expect(job.serviceStartedAt).toBeNull()
-    const serviceAt = start + (location === 'docked' ? 1 : 3) * minute
-    advanceFacility(state, serviceAt - 1)
-    expect(job.serviceStartedAt).toBeNull()
+    const serviceAt = start + (location === 'docked' ? 0 : 3) * minute
+    if (location === 'remote') {
+      expect(job.serviceStartedAt).toBeNull()
+      advanceFacility(state, serviceAt - 1)
+      expect(job.serviceStartedAt).toBeNull()
+    }
     advanceFacility(state, serviceAt)
     expect(vessel.dockingState).toBe('docked')
     expect(job.serviceStartedAt).toBe(serviceAt)
     expect(job.nextAt).toBe(serviceAt + 10 * minute)
     const reports = state.operations.filter((event) => event.repair?.jobId === job.id)
-    expect(reports.map((event) => event.operationCode)).toEqual([235, 240, 125, 140, 230])
-    if (location === 'docked') expect(reports.find((event) => event.operationCode === 125)?.summary).toContain('approach already complete')
+    expect(reports.map((event) => event.operationCode)).toEqual(location === 'docked' ? [235, 230] : [235, 240, 125, 140, 230])
   })
 
   it('immediately holds critical power faults and queues recovery when the drone is occupied', () => {
@@ -158,7 +159,10 @@ describe('Playtest 1007 operations follow-up', () => {
         const sequence = dockSequences.get(repair.jobId) ?? []
         if ([235, 240, 125, 140, 230].includes(event.operationCode!)) sequence.push(event.operationCode!)
         dockSequences.set(repair.jobId, sequence)
-        if (event.operationCode === 230 && sequence.includes(235)) expect(sequence).toEqual([235, 240, 125, 140, 230])
+        if (event.operationCode === 230 && sequence.includes(235)) {
+          expect(sequence).toEqual(sequence.includes(240) ? [235, 240, 125, 140, 230] : [235, 230])
+          expect(state.vessels.find((vessel) => vessel.id === repair.vesselId)?.dockingState).toBe('docked')
+        }
         if (event.operationCode === 245) {
           correctiveServices++
           faultTypes.add(repair.faultType)
@@ -184,5 +188,5 @@ describe('Playtest 1007 operations follow-up', () => {
     expect(correctiveServices).toBeGreaterThan(30)
     expect(faultTypes.size).toBe(8)
     expect(state.productionCycles).toBe(previousRun)
-  })
+  }, 30_000) // 10,080 simulated ticks; allow slower CI and developer machines.
 })
