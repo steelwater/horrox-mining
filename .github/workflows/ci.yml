@@ -58,8 +58,8 @@ jobs:
             android/gradle/wrapper/gradle-wrapper.properties
       - name: Install dependencies
         run: npm ci
-      - name: Build web assets
-        run: npm run build
+      - name: Build playtest web assets
+        run: npm run build:playtest
       - name: Sync Android assets and plugins
         run: npx cap sync android
       - name: Assemble debug APK
@@ -71,7 +71,7 @@ jobs:
           cp android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/apk/horrox-mining-debug.apk"
           cd "$RUNNER_TEMP/apk"
           sha256sum horrox-mining-debug.apk > SHA256SUMS
-          printf 'commit=%s\nrun=%s/%s/actions/runs/%s\nvariant=debug\n' \
+          printf 'commit=%s\nrun=%s/%s/actions/runs/%s\nvariant=debug\nweb_mode=playtest\n' \
             "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > build-info.txt
       - name: Upload debug APK
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

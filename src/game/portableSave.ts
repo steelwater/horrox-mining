@@ -49,6 +49,8 @@ const samples: Record<string, unknown> = {
   transcript: { id: '', speaker: '', text: '', timestamp: 0, operationAgeMs: 0, priority: 0 },
 }
 function checkShape(value: unknown, sample: unknown, path: string, field = ''): void {
+  // Schema 3/early schema 4 saves predate the routine-service counter.
+  if (field === 'runsSinceService' && value === undefined) return
   if (sample === null) {
     if (value === null) return
     if (field === 'pendingEvent') {
@@ -110,7 +112,12 @@ export function parseSave(text: string, now = Date.now()): FacilityState {
   // Validate against the normalizer at the saved clock, before real-time catch-up.
   // Any corrected/dropped field in a current schema indicates an invalid contract.
   const migrated = migrateFacility(raw, Math.max(raw.lastProcessedAt as number, raw.lastSavedAt as number, raw.lastActiveAt as number))
-  if (raw.version === SAVE_SCHEMA && !same(raw, migrated)) invalid('state (values or references)')
+  const comparable = JSON.parse(JSON.stringify(migrated)) as RecordValue
+  for (const vessel of comparable.vessels as RecordValue[]) {
+    const original = (raw.vessels as RecordValue[]).find((v) => v.id === vessel.id)!
+    if (!Object.hasOwn(original, 'runsSinceService')) delete vessel.runsSinceService
+  }
+  if (raw.version === SAVE_SCHEMA && !same(raw, comparable)) invalid('state (values or references)')
   if (raw.version === 3 && !legacyMatches(raw, migrated)) invalid('state (legacy values or references)')
   if (Math.max(raw.lastProcessedAt as number, raw.lastSavedAt as number, raw.lastActiveAt as number) > now) throw new Error('Save clock is ahead of this device. Check the device clock before importing.')
   return migrated

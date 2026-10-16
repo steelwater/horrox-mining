@@ -168,21 +168,21 @@ describe('repair requests and reconnects', () => {
     expect(returnBriefing(state, start, deadline!)).not.toContain('Press 2 for dispatch repair drone')
   })
 
-  it('keeps telemetry attribution and prioritizes an urgent pending repair in the short briefing', () => {
+  it('keeps telemetry attribution without asking for a decision on an automatically handled critical fault', () => {
     const state = operation()
     detectFault(state, state.vessels[0]!.id, 'communications-failure', start)
     expect(returnBriefing(state, start, start + minute)).toContain('Telemetry reported communications failure')
     detectFault(state, state.vessels[0]!.id, 'power-instability', start)
     const briefing = returnBriefing(state, start, start + minute)
-    expect(briefing).toContain('2 service requests')
-    expect(briefing).toContain('power instability')
-    expect(briefing).not.toContain('communications failure')
+    expect(briefing).toContain('1 service request')
+    expect(briefing).toContain('communications failure')
+    expect(state.vessels[0]!.activeFaults.find((fault) => fault.type === 'power-instability')!.decisionAt).toBeNull()
   })
 
   it.each([0, 1, 2])('uses correct operational count wording for %i items', (count) => {
     const state = operation()
     for (let i = 0; i < count; i++) state.processingQueue.push({ id: `load-${i}`, vesselId: state.vessels[0]!.id, tonnes: 12, completesAt: start + minute })
-    state.vessels.forEach((vessel, index) => { vessel.assignment = index < count ? 'extraction' : 'standby' })
+    state.vessels.forEach((vessel, index) => { vessel.assignment = index < count ? 'extraction' : 'standby'; vessel.dockingState = index < count ? 'deployed' : 'docked' })
     for (let i = 0; i < count; i++) detectFault(state, state.vessels[i]!.id, 'sensor-degradation', start)
     const status = operationalStatus(state)
     expect(status).toContain(`${count} queued load${count === 1 ? '' : 's'}.`)

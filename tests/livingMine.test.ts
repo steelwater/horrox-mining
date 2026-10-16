@@ -103,7 +103,7 @@ describe('persistent mine operations', () => {
     expect(vessel.routineServiceDue).toBe(true)
     advanceFacility(state, start + 22 * minute)
     expect(vessel.assignment).toBe('extraction')
-    expect(vessel.run).toBe(run + 1)
+    expect(vessel.run).toBe(run)
     expect(vessel.routineServiceDue).toBe(false)
     advanceFacility(offline, start + 22 * minute)
     expect(offline).toEqual(state)

@@ -7,8 +7,8 @@ android {
         applicationId "ltd.horrox.mining"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 4
-        versionName "0.1.3"
+        versionCode 7
+        versionName "0.1.6"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -51,4 +51,16 @@ try {
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+// Never package test fault frequency into a release, even after a prior debug sync.
+tasks.register('verifyReleaseAssets') {
+    doLast {
+        if (file('src/main/assets/public/playtest-build.json').exists()) {
+            throw new GradleException('Playtest web assets cannot be released. Run npm run cap:sync to rebuild normal production assets first.')
+        }
+    }
+}
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach {
+    dependsOn('verifyReleaseAssets')
 }

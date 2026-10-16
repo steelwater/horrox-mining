@@ -97,6 +97,7 @@ export function useFacility() {
       if (shouldBriefOnReturn(state, saved.lastActiveAt, now, saved.nextOperationId)) announce(returnBriefing(state, saved.lastActiveAt, now), 'Facility Control', 'terminal', 2)
     } else {
       Object.assign(state, createInitialState(now))
+      announce(operationalStatus(state), 'Facility Control', 'terminal', 2)
     }
     state.lastActiveAt = now
     ready.value = true
@@ -134,6 +135,12 @@ export function useFacility() {
       } else {
         announce(`${result.accepted ? '' : 'For this readiness check, '}${onboardingPrompt(state)}`, 'Facility Control', 'terminal', 2)
       }
+      await persist()
+      return
+    }
+
+    if (!state.commissioned) {
+      announce(operationalStatus(state), 'Facility Control', 'terminal', 2)
       await persist()
       return
     }
