@@ -173,3 +173,17 @@ Manual 390px browser check: docked drill repair moved from 235 directly to 230 a
 Reused Google's current Android testing/setup inventory guidance: existing Vitest logic tests and Capacitor/JUnit4/AndroidX/Espresso shell, with no new dependency or test framework. Compose, R8, Play and profiling work is outside this scope. Native installation/listening/lifecycle, Bluetooth, instrumented device tests and iOS runtime remain unverified. Previous source `d004d71`, retained V0.1.5 APK and pre-update save provide rollback. Stop at green PR #10 and the test APK; no merge, deployment, release/tag or cleanup.
 
 The seven-day test retains all 10,080 minute-stepped invariant checks with a dedicated 30-second timeout. One final local run exceeded Vitest’s default five seconds under machine load (about seven seconds); no behavior assertion failed. The larger per-test limit accommodates slow runners without reducing simulated duration or coverage.
+
+
+## Playtest 1018 wording follow-up — 19 October 2026
+
+Authority: [PR #10 follow-up](https://github.com/steelwater/horrox-mining/pull/10#issuecomment-6256556914). Initial CRITICAL announcements now explicitly state that Facility Control is initiating the predefined safe response immediately, with no Captain decision required to begin safety handling. Diagnostics and incident status remain accessible. Ordinary DEGRADED/FAULT prompts and five-minute decision windows are unchanged.
+
+Hull diagnostics use actual location both at detection and when requested: remote/returning vessels require priority return and docking; docked vessels require priority structural inspection and dockside repair. Repair transitions, safety timing and accelerated playtest settings are unchanged.
+
+Code 390 retains its existing emergency-flag rule: initial CRITICAL incidents and disabled/OFFLINE escalations are emergencies. It is emitted only after the vessel has no unresolved emergency faults; an ordinary thruster FAULT recovery alone does not emit 390. Regression coverage documents this distinction rather than changing simulation policy.
+
+Verification: 208 tests, type checking, normal production build, playtest build, Capacitor sync, Android debug assembly and diff checks pass. No lint script exists. A 390px real-terminal fixture showed the explicit autonomous initial history report and accessible remote hull diagnostics, with readable wrapping and the V0.1.7 label. Automated coverage also checks docked wording and the switch after arrival. Native installation/audio/lifecycle, Bluetooth, instrumented tests and iOS runtime remain unverified. Existing Android testing/setup inventory is reused; no new dependency or configuration.
+
+V0.1.7 uses Android versionCode 8. The APK signature matches V0.1.6 and all five packaged web files match the playtest build. SHA-256: `76ace896be0096ad4b3c5d3a5ddfad20b5010d68b99def5cd36f197b016288c5`. Final commit and CI evidence are recorded in the canonical Drive handoff and PR. Rollback remains source `9c0a7e8`, retained V0.1.6 APK and pre-update save. User-owned README changes and build-apk.sh are excluded. Next: Captain playtest; no merge, deployment, release/tag or cleanup.
+

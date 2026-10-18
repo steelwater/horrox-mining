@@ -21,12 +21,18 @@ export const faultLibrary: Record<FaultType, FaultDefinition> = {
   'drill-wear': { name: 'Drill wear', subsystem: 'drill', severity: 'degraded', allowsMining: true, efficiency: 0.8, safeResponse: 'dock', diagnostics: 'Drill teeth are worn. Reduced cutting rate remains safe.', requirements: 'Replace cutting teeth', operationCode: 205, locations: ['remote-drone', 'dock'], serviceMs: 5 * MINUTE },
   'thruster-malfunction': { name: 'Thruster malfunction', subsystem: 'propulsion', severity: 'fault', allowsMining: false, efficiency: 0, safeResponse: 'drone', diagnostics: 'Thruster response is uneven. Low-power return remains possible unless disabled.', requirements: 'Service thruster actuator', operationCode: 205, locations: ['remote-drone', 'dock'], serviceMs: 8 * MINUTE },
   'sensor-degradation': { name: 'Sensor degradation', subsystem: 'sensors', severity: 'degraded', allowsMining: true, efficiency: 0.85, safeResponse: 'drone', diagnostics: 'Dust on the sensor array reduces confidence. Reduced-rate extraction is safe.', requirements: 'Clean and calibrate sensor array', operationCode: 205, locations: ['remote-drone', 'dock'], serviceMs: 4 * MINUTE },
-  'hull-damage': { name: 'Hull damage', subsystem: 'hull', severity: 'critical', allowsMining: false, efficiency: 0, safeResponse: 'dock', diagnostics: 'Outer hull damage detected. Crew compartment is secure. Stop work and request priority docking.', requirements: 'Dockside structural patch and inspection', operationCode: 302, locations: ['dock'], serviceMs: 10 * MINUTE },
+  'hull-damage': { name: 'Hull damage', subsystem: 'hull', severity: 'critical', allowsMining: false, efficiency: 0, safeResponse: 'dock', diagnostics: 'Outer hull damage detected. Crew compartment is secure.', requirements: 'Dockside structural patch and inspection', operationCode: 302, locations: ['dock'], serviceMs: 10 * MINUTE },
   'communications-failure': { name: 'Communications failure', subsystem: 'communications', severity: 'fault', allowsMining: false, efficiency: 0, safeResponse: 'dock', diagnostics: 'Primary antenna is unreliable. Vessel telemetry and the predefined safe-return protocol remain available.', requirements: 'Repair antenna connection', operationCode: 205, locations: ['remote-drone', 'dock'], serviceMs: 5 * MINUTE },
   'cargo-jam': { name: 'Cargo mechanism jam', subsystem: 'cargo', severity: 'fault', allowsMining: false, efficiency: 0, safeResponse: 'dock', diagnostics: 'Cargo latch is jammed. Cargo remains secured; dockside service is required before transfer.', requirements: 'Release and align cargo latch', operationCode: 205, locations: ['dock'], serviceMs: 6 * MINUTE },
   'power-instability': { name: 'Power instability', subsystem: 'power', severity: 'critical', allowsMining: false, efficiency: 0, safeResponse: 'drone', diagnostics: 'Work bus isolated. Independent safety power is stable. Hold position for service.', requirements: 'Replace power regulator', operationCode: 301, locations: ['remote-drone', 'dock'], serviceMs: 7 * MINUTE },
   'navigation-fault': { name: 'Navigation fault', subsystem: 'navigation', severity: 'fault', allowsMining: false, efficiency: 0, safeResponse: 'dock', diagnostics: 'Guidance disagreement detected. Facility beacon supports a slow safe return.', requirements: 'Guidance-array calibration', operationCode: 205, locations: ['remote-drone', 'dock'], serviceMs: 5 * MINUTE },
 }
+function faultDiagnostics(vessel: Vessel, type: FaultType): string {
+  const diagnosis = faultLibrary[type].diagnostics
+  if (type !== 'hull-damage') return diagnosis
+  return `${diagnosis} Stop work. ${vessel.dockingState === 'docked' ? 'Priority structural inspection and dockside repair required.' : 'Priority return and docking required.'}`
+}
+
 export const activeFaults = (v: Vessel) => v.activeFaults.filter((f) => f.resolvedAt === null)
 export const activeJob = (state: FacilityState, fault: VesselFault) => state.repairJobs.find((j) => j.faultId === fault.id && j.state !== 'complete')
 export const pendingFaults = (state: FacilityState) => state.vessels.flatMap((v) => activeFaults(v).filter((f) => f.decisionAt !== null).map((f) => ({ vessel: v, fault: f })))
@@ -69,7 +75,11 @@ export function detectFault(state: FacilityState, vesselId: string, type: FaultT
   }
   if (fault.severity === 'degraded' && ['extraction', 'delivery'].includes(vessel.assignment)) fault.escalatesAt = at + 30 * MINUTE
   const requester = type === 'communications-failure' ? undefined : state.miners.find((miner) => miner.id === vessel.minerId)
-  log(state, vessel, fault, at, definition.operationCode, `${requester ? `Control, ${requester.callsign} requesting service for ${vessel.name}.` : `${vessel.name}: telemetry reports a service requirement.`} ${definition.name}. Condition ${vessel.condition.toUpperCase()}. ${definition.diagnostics} Press 3 for vessel support; 1 for urgent incidents.`, requester?.id ?? 'facility', null, 'Equipment reports an operational fault; unsafe work is suspended immediately.', undefined, before)
+  const report = requester ? `Control, ${requester.callsign} ${fault.emergency ? 'reporting a critical fault on' : 'requesting service for'} ${vessel.name}.` : `${vessel.name}: telemetry reports a service requirement.`
+  const response = fault.emergency
+    ? 'Facility Control is initiating the predefined safe response immediately. No Captain decision is required to begin safety handling. Press 3 for diagnostics and status; 1 for urgent incident status.'
+    : 'Press 3 for vessel support; 1 for urgent incidents.'
+  log(state, vessel, fault, at, definition.operationCode, `${report} ${definition.name}. Condition ${vessel.condition.toUpperCase()}. ${faultDiagnostics(vessel, type)} ${response}`, requester?.id ?? 'facility', null, 'Equipment reports an operational fault; unsafe work is suspended immediately.', undefined, before)
   if (fault.emergency) decideRepair(state, vessel, fault, recommendation(state, vessel, fault).action, at, 'facility')
   return fault
 }
@@ -131,7 +141,7 @@ export function droneStatus(state: FacilityState): string {
 export function decideRepair(state: FacilityState, vessel: Vessel, fault: VesselFault, action: RepairAction, at: number, actor = 'captain'): string {
   if (fault.resolvedAt !== null) return `${vessel.name}: service already complete.`
   if (fault.decisionAt !== null && at >= fault.decisionAt && actor === 'captain') return decideRepair(state, vessel, fault, 'crew', at, 'facility')
-  if (action === 'diagnostics') return log(state, vessel, fault, at, 201, `${vessel.name}. ${faultLibrary[fault.type].diagnostics} Required: ${faultLibrary[fault.type].requirements}.`, actor, action)
+  if (action === 'diagnostics') return log(state, vessel, fault, at, 201, `${vessel.name}. ${faultDiagnostics(vessel, fault.type)} Required: ${faultLibrary[fault.type].requirements}.`, actor, action)
   if (action === 'recommend') return recommendation(state, vessel, fault).text
   if (activeJob(state, fault)) return vesselRepairStatus(state, vessel, fault)
   if (action === 'continue' && (miningEfficiency(vessel) === 0 || !['deployed', 'returning'].includes(vessel.dockingState))) return 'Continued work is not safe. Request the Facility recommendation.'
@@ -272,6 +282,7 @@ export function advanceRepairs(state: FacilityState, at: number): void {
         drone.maintenanceDue = drone.serviceHistory.length % 4 === 0
       }
       log(state, vessel, fault, at, 245, `${vessel.name}: ${faultLibrary[fault.type].name} repaired${drone ? ` by ${drone.name}` : ' by dockside crew'} in ${elapsedMinutes((at - job.serviceStartedAt!) / MINUTE)}. Condition ${vessel.condition.toUpperCase()}. ${activeFaults(vessel).length ? 'Further faults remain.' : fault.emergency ? 'Emergency recovery complete.' : 'Service complete.'}`, 'facility', null, 'Inspection confirmed this subsystem restored.', job, before)
+      // 390 closes all emergency recovery on this vessel: CRITICAL or disabled/OFFLINE.
       if (fault.emergency && !activeFaults(vessel).some((f) => f.emergency)) log(state, vessel, fault, at, 390, `${vessel.name}: emergency recovery complete. Crew and vessel secure.`, 'facility', null, 'All emergency faults resolved.', job, before)
       if (!activeFaults(vessel).length && vessel.resumeAfterRepair) {
         vessel.resumeAfterRepair = false
