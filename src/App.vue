@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { formatOperationTime, operationDate } from './game/calendar'
 import { useFacility } from './composables/useFacility'
 import { useTerminalTools } from './composables/useTerminalTools'
+import { COMMISSIONING_NOTICE } from './game/engine'
 import { buildLabel } from './game/build'
 import { formatOperationalHistory, formatTranscript } from './game/portableSave'
 import type { KeypadKey } from './game/types'
@@ -154,7 +155,7 @@ window.setTimeout(() => {
           <strong>Terminal link established.</strong>
         </article>
         <div class="request-state">
-          {{ pendingEvent ? `REQUEST OPEN // ${pendingEvent.type.toUpperCase()}` : 'NO CAPTAIN RESPONSE REQUIRED' }}
+          {{ !state.commissioned ? (onboardingActive ? 'COMMISSIONING IN PROGRESS' : 'COMMISSIONING REQUIRED // READINESS CHECK') : pendingEvent ? `REQUEST OPEN // ${pendingEvent.type.toUpperCase()}` : 'NO CAPTAIN RESPONSE REQUIRED' }}
         </div>
       </section>
 
@@ -174,6 +175,9 @@ window.setTimeout(() => {
         </button>
       </section>
 
+      <p v-if="!state.commissioned" class="utility-message" role="status">
+        {{ onboardingActive ? 'Facility not commissioned. Normal operations have not started. Complete the readiness check or select Delegate Checks to authorize operations.' : COMMISSIONING_NOTICE }}
+      </p>
       <section class="terminal-actions" aria-label="Terminal options">
         <button @click.stop="cycleDisplayMode">DISPLAY: {{ displayLabel }}</button>
         <button v-if="onboardingActive" @click="skipOnboarding">DELEGATE CHECKS</button>

@@ -205,7 +205,7 @@ Named vessel faults, persistent conditions, remote and dockside repairs, reserve
 
 The core PR is merged. The [Milestone 3 follow-up brief](https://docs.google.com/document/d/1EX_KnELwg7UkkG1D3HPb68h12kcnEMgBmG3oamHAxHg/edit) reopens acceptance for speech chronology, normal-operation repair activity, and copy/paste tools. This follow-up queues answers behind their requests, introduces a real early sensor-service interaction, and adds **Copy Transcript**, **Export Save**, and **Import Save** under the secondary terminal menu. Import validates before an explicit replacement confirmation and rolls back failed storage/reinitialization.
 
-`package.json` maintains the app `version` and `milestone`; `src/game/build.ts` derives the footer label and export/transcript metadata. The current test-build label is V0.1.3 / MILESTONE 3 - Post-Milestone 3 Operations Flow & Chatter Polish. The description in `src/game/build.ts` names the approved brief; Android identifies this test build as versionName 0.1.3 / versionCode 4. No production release or tag is implied. Portable JSON wraps the complete persistent state with format/schema/build/export-time metadata. It supports complete schema 3 and 4 envelopes, migrates schema 3 through the existing loader, and rejects unsupported versions or invalid state. Existing installed schema 1–3 saves still migrate normally; export them from the current app to obtain a portable schema 4 envelope.
+`package.json` maintains the app `version` and `milestone`; `src/game/build.ts` derives the footer label and export/transcript metadata. The current test-build label is V0.1.6 / MILESTONE 3 - Post-Milestone 3 Operations Flow & Chatter Polish. The description in `src/game/build.ts` names the approved brief; Android identifies this test build as versionName 0.1.6 / versionCode 7. No production release or tag is implied. Portable JSON wraps the complete persistent state with format/schema/build/export-time metadata. It supports complete schema 3 and 4 envelopes, migrates schema 3 through the existing loader, and rejects unsupported versions or invalid state. Existing installed schema 1–3 saves still migrate normally; export them from the current app to obtain a portable schema 4 envelope.
 
 See [implementation, codes, playtest instructions, save contract, and verification](docs/milestone-3.md). Dan reported successful playtesting of the final Milestone 3 follow-up on 29 September 2026 and authorized Uplink.
 
@@ -241,3 +241,12 @@ For Android builds on this machine, use Android Studio's bundled JDK:
 ```sh
 JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" npm run android:debug
 ```
+
+
+### Critical incident playtest builds
+
+`npm run dev:playtest` enables accelerated faults on localhost. `npm run android:debug` and the CI debug APK use `npm run build:playtest`; the footer and exported transcript/history are marked `[CRITICAL PLAYTEST]`. The named interval in `src/game/playtest.ts` schedules a mixed fault cycle every two completed extraction runs, alternating critical and ordinary faults and starting with hull damage (normally within the first hour; subsequent critical incidents recur within roughly 1–2 hours, depending on service and cut choice). Ordinary incidents remain in the cycle. The normal `npm run dev`, `npm run build`, and `npm run cap:sync` retain production balancing. No save flag persists the test weighting: rebuilding in normal mode disables it; existing real incident records/jobs remain intact.
+
+Playtest bundles contain `playtest-build.json`. Android release builds reject synced assets with this marker; run `npm run cap:sync` to rebuild and sync normal assets before a release build. This guard does not sign or publish a release. To disable accelerated faults for a debug APK, use normal `npm run cap:sync` followed by the existing Gradle `assembleDebug` task.
+
+Reconnects after at least 30 minutes summarize retained extraction, delivery, processing, service, inspection, fault and decision activity plus current status. If the bounded history cannot cover the entire absence, totals explicitly say they cover retained records. Detailed chronology remains in operational history. Dock repair follows only remaining real travel/docking transitions; a secured vessel starts service when its berth is clear without replaying arrival codes.

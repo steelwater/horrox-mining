@@ -105,7 +105,8 @@ describe('repair resources and lifecycle', () => {
     const { state, vessel, fault } = setup('hull-damage')
     state.systems.berth = 'isolated'
     state.systems.berthInspectionAt = start + 8 * minute
-    expect(recommendation(state, vessel, fault).text).toContain('isolated')
+    expect(fault.decisionAt).toBeNull()
+    expect(state.repairJobs[0]?.createdAt).toBe(start)
     decideRepair(state, vessel, fault, 'safe-return', start)
     advanceFacility(state, start + 3 * minute)
     expect(vessel.dockingState).toBe('holding')
@@ -115,7 +116,7 @@ describe('repair resources and lifecycle', () => {
     expect(state.repairJobs[0]?.state).toBe('servicing')
     advanceFacility(state, start + 18 * minute)
     expect(vessel.condition).toBe('nominal')
-    expect(state.operations.map((e) => e.operationCode)).toEqual(expect.arrayContaining([325, 125, 140, 230, 245, 390]))
+    expect(state.operations.map((e) => e.operationCode)).toEqual(expect.arrayContaining([235, 240, 125, 140, 230, 245, 390]))
   })
 
   it('offers a dock fallback and never reuses an assigned drone for another vessel', () => {
@@ -134,8 +135,11 @@ describe('repair resources and lifecycle', () => {
   })
 
   it('queues disabled recovery with an unavailable drone without inventing mobility', () => {
-    const { state, vessel, fault } = setup('power-instability')
+    const state = createInitialState(start)
+    commissionFacility(state, start)
+    const vessel = state.vessels[0]!
     state.repairDrones[0]!.state = 'unavailable'
+    const fault = detectFault(state, vessel.id, 'power-instability', start)!
     decideRepair(state, vessel, fault, 'crew', start)
     advanceFacility(state, start + 60 * minute)
     expect(vessel.dockingState).toBe('holding')
@@ -157,17 +161,17 @@ describe('repair resources and lifecycle', () => {
     expect(vessel.cargo).toBe(12)
     expect(vessel.delivered).toBe(0)
     expect(state.processingQueue).toHaveLength(0)
-    advanceFacility(state, start + 32 * minute - 1)
+    advanceFacility(state, start + 27 * minute - 1)
     expect(vessel.assignment).toBe('standby')
     expect(vessel.cargo).toBe(12)
     expect(vessel.delivered).toBe(0)
-    advanceFacility(state, start + 32 * minute)
+    advanceFacility(state, start + 27 * minute)
     expect(vessel.condition).toBe('nominal')
     expect(vessel.assignment).toBe('delivery')
-    advanceFacility(state, start + 34 * minute)
+    advanceFacility(state, start + 29 * minute)
     expect(vessel.delivered).toBe(12)
     expect(vessel.assignment).toBe('extraction')
-    advanceFacility(offline, start + 34 * minute)
+    advanceFacility(offline, start + 29 * minute)
     expect(offline).toEqual(state)
     const complete = state.operations.find((event) => event.operationCode === 245 && event.repair)!
     const delivery = state.operations.find((event) => event.operationCode === 165)!
@@ -310,29 +314,24 @@ describe('post-repair continuity', () => {
     expect(state.operations.some((event) => event.summary.includes('extraction resumed at the remote work site'))).toBe(true)
   })
 
-  it('unloads retained dockside cargo before starting scheduled routine service', () => {
+  it('unloads retained cargo after corrective inspection without redundant routine service', () => {
     const state = createInitialState(start)
     commissionFacility(state, start)
     state.nextRepairId = 2
     const vessel = state.vessels[0]!
     vessel.operatingRuns = 48
     vessel.routineServiceDue = true
-    advanceFacility(state, start + 32 * minute)
+    vessel.runsSinceService = 4
+    advanceFacility(state, start + 27 * minute)
     expect(vessel.assignment).toBe('delivery')
     expect(vessel.dockingState).toBe('docked')
     expect(vessel.cargo).toBe(12)
-    // A normal next tick must not assign routine service to this scheduled unload.
-    advanceFacility(state, start + 32 * minute + 1000)
-    expect(state.repairDrones[0]?.state).toBe('available')
-    advanceFacility(state, start + 34 * minute)
+    expect(vessel.routineServiceDue).toBe(false)
+    expect(vessel.runsSinceService).toBe(0)
+    advanceFacility(state, start + 29 * minute)
     expect(vessel.delivered).toBe(12)
-    expect(vessel.assignment).toBe('standby')
-    expect(vessel.completesAt).toBeNull()
-    expect(state.repairDrones[0]?.state).toBe('servicing')
-    advanceFacility(state, start + 39 * minute - 1)
-    expect(vessel.assignment).toBe('standby')
-    expect(vessel.delivered).toBe(12)
-    advanceFacility(state, start + 39 * minute)
     expect(vessel.assignment).toBe('extraction')
+    expect(state.repairDrones[0]?.state).toBe('available')
+    expect(state.operations.some((event) => event.summary.includes('assigned to routine service'))).toBe(false)
   })
 })
