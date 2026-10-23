@@ -1,3 +1,4 @@
+import { autonomyExplanation, miningReporter, updateCrewState } from './crew'
 import { quantity } from './text'
 import { activeFaults, advanceRepairs, detectFault, detectOperationalWear, droneStatus, miningEfficiency, pendingFaults, repairDeadlines, faultLibrary, scheduleRepairs, vesselRepairStatus } from './repairs'
 import { OPERATION_START, operationAgeAt, formatOperationTime } from './calendar'
@@ -70,7 +71,8 @@ export function resolvePendingEvent(
 
 export function createInitialState(now: number): FacilityState {
   return {
-    version: 4,
+    version: 5,
+    chatterMemory: {},
     operationStart: OPERATION_START,
     commissioned: false,
     lastProcessedAt: now,
@@ -223,6 +225,11 @@ export function applyPendingDecision(state: FacilityState, key: KeypadKey | null
       hauler.completesAt = null
     }
   }
+  if (automatic && !event.immediateSafety && source !== 'facility') {
+    const explanation = autonomyExplanation(state.miners.find((crew) => crew.id === source))
+    reason = `${reason} ${explanation}`
+    message = `${message} ${explanation}`
+  }
   recordOperation(state, { timestamp: now, source, category: event.type, summary: message, relatedIds: [...event.participants, ...(event.type === 'mining' ? [vessel.id] : event.type === 'docking' ? [hauler.id, 'berth-04'] : [event.type === 'maintenance' ? 'coolant' : event.type === 'problem' ? 'scanner' : 'berth-04'])], actionRequested: !event.immediateSafety, resolution: automatic || source === 'facility' ? 'autonomous' : 'manual', reason })
   for (const miner of state.miners.filter((item) => event.participants.includes(item.id))) {
     miner.history = [...miner.history, message].slice(-100)
@@ -306,7 +313,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
         vessel.runsSinceService++
         detectOperationalWear(state, vessel, 'extraction', at)
         const canDeliver = miningEfficiency(vessel) > 0
-        routine(state, at, vessel.minerId, 'mining', `${vessel.name} completed extraction run ${vessel.run}. ${canDeliver ? `Returning with ${vessel.cargo} tonnes.` : `Holding ${vessel.cargo} tonnes safely pending repair.`}`, [vessel.id, vessel.minerId], canDeliver ? 'The assigned run is complete. Crew is delivering the cargo.' : 'The assigned run is complete; unsafe transit is suspended.', 112)
+        routine(state, at, miningReporter(state, vessel), 'mining', `${vessel.name} completed extraction run ${vessel.run}. ${canDeliver ? `Returning with ${vessel.cargo} tonnes.` : `Holding ${vessel.cargo} tonnes safely pending repair.`}`, [vessel.id, vessel.minerId], canDeliver ? 'The assigned run is complete. Crew is delivering the cargo.' : 'The assigned run is complete; unsafe transit is suspended.', 112)
       } else if (state.systems.berth === 'isolated') {
         vessel.completesAt = state.systems.berthInspectionAt ?? at + SERVICE_MS
         vessel.dockingState = 'holding'
@@ -349,7 +356,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
     dispatchRoutineService(state, at)
     for (const load of state.processingQueue.filter((q) => q.completesAt <= at)) {
       state.oreProcessed += load.tonnes
-      routine(state, at, 'processor-01', 'processing', `Processor One completed a ${load.tonnes} tonne load.`, [load.vesselId, 'processor-01'], 'Queued processing completed normally.')
+      routine(state, at, 'ada-sen', 'processing', `Processor One completed a ${load.tonnes} tonne load.`, [load.vesselId, 'processor-01'], 'Queued processing completed normally.')
     }
     state.processingQueue = state.processingQueue.filter((q) => q.completesAt > at)
     state.lastProcessedAt = at
@@ -378,6 +385,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
   // Calendar age includes the skipped interval; only operational work is bounded.
   state.facilityAgeMs += now - state.lastProcessedAt
   state.lastProcessedAt = now
+  updateCrewState(state)
 }
 
 export const COMMISSIONING_NOTICE = 'Facility not commissioned. Normal operations have not started, so no operational events are generated. Select Readiness Check to start or resume commissioning, then complete or delegate the checks.'

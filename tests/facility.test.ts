@@ -491,7 +491,7 @@ describe('spoken terminal commands', () => {
     expect(speech.speak.mock.calls.at(-1)![0]).toContain('Press 8 to acknowledge facility support')
   })
 
-  it('retains simultaneous delivery and routine service in the transcript with one combined announcement', async () => {
+  it('retains simultaneous delivery and routine service with their distinct speakers', async () => {
     vi.useFakeTimers()
     const start = 1_800_000_000_000
     vi.setSystemTime(start)
@@ -508,10 +508,12 @@ describe('spoken terminal commands', () => {
     vi.setSystemTime(start + 17 * 60_000); callbacks.get(1000)!()
     const reports = facility.state.operations.filter((event) => event.timestamp === Date.now())
     expect(reports).toHaveLength(2)
-    for (const event of reports) expect(facility.state.transcript).toContainEqual(expect.objectContaining({ text: event.summary, timestamp: event.timestamp }))
-    expect(speech.speak).toHaveBeenCalledTimes(1)
+    for (const event of reports) expect(facility.state.transcript).toContainEqual(expect.objectContaining({ text: expect.stringContaining(event.summary), timestamp: event.timestamp }))
+    expect(speech.speak).toHaveBeenCalledTimes(2)
+    expect(speech.speak.mock.calls[0]![1]).toBe('measured')
+    expect(speech.speak.mock.calls[1]![1]).toBe('terminal')
     expect(speech.speak.mock.calls[0]![0]).toContain('delivered 12 tonnes')
-    expect(speech.speak.mock.calls[0]![0]).toContain('assigned to routine service')
+    expect(speech.speak.mock.calls[1]![0]).toContain('assigned to routine service')
   })
 
   it('reports remote work resumption in both history and the connected transcript without inventing a return', async () => {

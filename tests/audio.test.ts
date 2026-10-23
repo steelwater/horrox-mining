@@ -31,6 +31,27 @@ describe('native speech priority', () => {
     expect(native.speakNatively.mock.calls[2]![0].text).toBe('Next report')
   })
 
+  it('interrupts a long Easter egg for ordinary operational requests without replaying its remaining lines', async () => {
+    let finishOld!: () => void
+    native.speakNatively.mockImplementationOnce(() => new Promise<void>((resolve) => { finishOld = resolve })).mockResolvedValue(undefined)
+    native.stopNativeSpeech.mockResolvedValue(undefined)
+    const audio = new AudioDirector()
+    const heard: string[] = []
+    audio.speakExchange([
+      { speaker: 'Keel', profile: 'measured', text: 'C.A.R.L. Simulator.' },
+      { speaker: 'Patch', profile: 'bright', text: 'Unheard reply.' },
+    ], (line) => heard.push(line.text))
+    expect(native.speakNatively.mock.calls[0]![0].text).toBe('C. A. R. L. Simulator.')
+    expect(heard).toEqual(['C.A.R.L. Simulator.'])
+    audio.speak('Incoming docking request', 'steady', 3, { kind: 'request', cause: 'dock' })
+    await flush()
+    finishOld()
+    await flush()
+    expect(native.stopNativeSpeech).toHaveBeenCalledOnce()
+    expect(native.speakNatively.mock.calls.map(([options]) => options.text)).toEqual(['C. A. R. L. Simulator.', 'Incoming docking request'])
+    expect(heard).toHaveLength(1)
+  })
+
   it('finishes ordinary speech, then the request, then its immediate decision response', async () => {
     const completions: Array<() => void> = []
     native.speakNatively.mockImplementation(() => new Promise<void>((resolve) => completions.push(resolve)))

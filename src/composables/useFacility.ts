@@ -1,4 +1,5 @@
-import { eligibleChatter } from '../game/chatter'
+import { crewReport } from '../game/crew'
+import { eligibleChatter, rememberChatter, rememberChatterContext } from '../game/chatter'
 import { exportSave, parseSave } from '../game/portableSave'
 import { activeFaults, activeJob, decideRepair, droneStatus, pendingFaults, repairMenu, repairOptions, vesselRepairStatus } from '../game/repairs'
 import { operationAgeAt } from '../game/calendar'
@@ -62,6 +63,7 @@ export function useFacility() {
   }
 
   function announce(text: string, speaker = 'Facility Control', profileId = 'terminal', priority: AudioPriority = 3, context?: SpeechContext, event?: OperationalEvent): void {
+    if (event && speaker !== 'Facility Control') text = crewReport(state, { ...event, summary: text })
     recordTranscript(text, speaker, priority, event)
     audio.speak(text, profileId, priority, context)
   }
@@ -187,7 +189,7 @@ export function useFacility() {
     if (state.pendingEvent) {
       if (key === '0') {
         const event = findEvent(state.pendingEvent.eventId)!
-        announce(`${event.spokenLines.join(' ')}${faults.length ? ` ${faults.map(({ vessel, fault }) => vesselRepairStatus(state, vessel, fault)).join(' ')}` : ''}`, speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority, { kind: 'request', cause: `${event.id}:${state.pendingEvent.requestedAt}` })
+        announce(`${crewReport(state, { source: event.participants[0] ?? 'facility', summary: event.spokenLines.join(' '), category: event.type })}${faults.length ? ` ${faults.map(({ vessel, fault }) => vesselRepairStatus(state, vessel, fault)).join(' ')}` : ''}`, speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority, { kind: 'request', cause: `${event.id}:${state.pendingEvent.requestedAt}` })
         return
       }
       const cause = `${state.pendingEvent.eventId}:${state.pendingEvent.requestedAt}`
@@ -225,7 +227,7 @@ export function useFacility() {
       announce('That channel has no new report at this time.', 'Facility Control')
       return
     }
-    announce(event.spokenLines.join(' '), speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority, event.immediateSafety ? undefined : { kind: 'request', cause: `${event.id}:${state.pendingEvent!.requestedAt}` })
+    announce(crewReport(state, { source: event.participants[0] ?? 'facility', summary: event.spokenLines.join(' '), category: event.type }), speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority, event.immediateSafety ? undefined : { kind: 'request', cause: `${event.id}:${state.pendingEvent!.requestedAt}` })
     if (event.immediateSafety) announce(state.operations.at(-1)!.summary, 'Facility Control', 'terminal', 1)
   }
 
@@ -256,12 +258,13 @@ export function useFacility() {
           const group = [entry]
           if (!entry.repair && entry.resolution !== 'pending' && entry.category !== 'safety') {
             while (reports[i + 1] && !reports[i + 1]!.repair && reports[i + 1]!.resolution !== 'pending'
-              && reports[i + 1]!.category !== 'safety' && reports[i + 1]!.timestamp === entry.timestamp
+              && reports[i + 1]!.category !== 'safety' && reports[i + 1]!.source === entry.source && reports[i + 1]!.timestamp === entry.timestamp
               && reports[i + 1]!.relatedIds.some((id) => entry.relatedIds.includes(id))) group.push(reports[++i]!)
           }
           if (group.length > 1) {
-            for (const report of group) recordTranscript(report.summary, 'Facility Control', 2, report)
-            audio.speak(group.map((report) => report.summary).join(' '), 'terminal', 2)
+            const lines = group.map((report) => crewReport(state, report))
+            group.forEach((report, index) => recordTranscript(lines[index]!, speakerFor(report.source), 2, report))
+            audio.speak(lines.join(' '), profileFor(entry.source), 2)
             continue
           }
           const priority = entry.category === 'safety' && entry.operationCode !== 390 ? 1 : 2
@@ -277,7 +280,7 @@ export function useFacility() {
             const summary = entry.resolution === 'pending'
               ? `Earlier request: ${entry.summary.replace(/ Press \d[\s\S]*$/, '')}`
               : timedOut ? `No captain decision was received within the response window. Facility Control applied the safe operational response. ${entry.summary}` : entry.summary
-            announce(summary, 'Facility Control', 'terminal', priority,
+            announce(summary, speakerFor(entry.source), profileFor(entry.source), priority,
               entry.repair ? { kind: 'response', cause: entry.repair.faultId } : undefined, entry)
           }
         }
@@ -313,14 +316,28 @@ export function useFacility() {
     const eligible = eligibleChatter(state, Date.now())
     // An opportunity is not an obligation to speak.
     if (!eligible.length || Math.random() >= 0.65) return
-    const exchange = eligible[Math.floor(Math.random() * eligible.length)]!
+    // Ordinary mining voices get most opportunities; cross-app and specialist traffic stays sparse.
+    const rare = eligible.filter((exchange) => exchange.pack)
+    const ordinary = eligible.filter((exchange) => !exchange.pack)
+    const pool = rare.length && Math.random() < 0.15 ? rare : ordinary
+    if (!pool.length) return
+    const minersFirst = pool.filter((exchange) => exchange.context === 'mining')
+    const choices = minersFirst.length && Math.random() < 0.65 ? minersFirst : pool
+    const exchange = choices[Math.floor(Math.random() * choices.length)]!
+    const lines = exchange.lines.map((line) => {
+      const id = miners.find((crew) => crew.callsign === line.speaker)?.id
+      const crew = state.miners.find((person) => person.id === id)
+      return crew ? { ...line, speaker: crew.callsign, profile: crew.voiceProfileId } : line
+    })
     let recorded = false
-    audio.speakExchange(exchange.lines, (line) => {
+    audio.speakExchange(lines, (line) => {
       if (!recorded) {
+        rememberChatter(state, exchange, Date.now())
         recordOperation(state, { timestamp: Date.now(), source: line.speaker, category: 'chatter',
           summary: line.text, relatedIds: [exchange.id], actionRequested: false, resolution: 'autonomous', reason: null })
         recorded = true
       }
+      if (line === lines.at(-1)) rememberChatterContext(state, exchange, Date.now())
       recordTranscript(line.text, line.speaker, 5)
       void persist()
     })
@@ -399,11 +416,11 @@ export function useFacility() {
   }
 
   function speakerFor(minerId?: string): string {
-    return miners.find((miner) => miner.id === minerId)?.callsign ?? 'Facility Control'
+    return state.miners.find((miner) => miner.id === minerId)?.callsign ?? 'Facility Control'
   }
 
   function profileFor(minerId?: string): string {
-    return miners.find((miner) => miner.id === minerId)?.voiceProfileId ?? 'terminal'
+    return state.miners.find((miner) => miner.id === minerId)?.voiceProfileId ?? 'terminal'
   }
 
   onMounted(() => {

@@ -29,7 +29,15 @@ export type VoiceProfile = {
   fallbackOrder: string[]
 }
 
-export type Miner = {
+export type CrewProfile = {
+  department: 'Mining' | 'Docking' | 'Maintenance' | 'Refinery' | 'Grading' | 'Storage' | 'Cargo' | 'Transport'
+  temperament: string
+  specialty: string
+  experience: 'veteran' | 'established' | 'newcomer'
+  radioStyle: 'code-first' | 'plain-first' | 'conversational'
+  vesselId: string | null
+  lastPhrase: string | null
+
   id: string
   name: string
   callsign: string
@@ -45,6 +53,9 @@ export type Miner = {
   history: string[]
 }
 
+// Retain the existing collection name in saves and consumers. It now includes all departments.
+export type Miner = CrewProfile
+
 export type OnboardingStatus = 'pending' | 'active' | 'complete' | 'skipped'
 
 export type PendingEvent = {
@@ -53,7 +64,8 @@ export type PendingEvent = {
 }
 
 export type FacilityState = {
-  version: 4
+  version: 5
+  chatterMemory: Record<string, number>
   operationStart: '2075-09-17'
   commissioned: boolean
   lastProcessedAt: number
@@ -164,7 +176,9 @@ export type OperationalEvent = {
 export type ChatterLine = { speaker: string; profile: string; text: string }
 export type ChatterExchange = {
   id: string
-  context: 'mining' | 'dock' | 'processing' | 'maintenance' | 'service'
+  context: 'mining' | 'dock' | 'processing' | 'maintenance' | 'quiet' | 'transfer'
+  pack?: 'TS' | 'RL'
+  requires?: string
   cooldownMs: number
   lines: ChatterLine[]
 }

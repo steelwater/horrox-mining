@@ -6,7 +6,7 @@ import { migrateFacility } from './persistence'
 import type { FacilityState, OperationalEvent, TranscriptEntry } from './types'
 
 export const SAVE_FORMAT = 'horrox-mining-portable-save'
-export const SAVE_SCHEMA = 4
+export const SAVE_SCHEMA = 5
 
 export function formatTranscript(entries: TranscriptEntry[]): string {
   return [`1st Horrox Mining Ltd. — ${buildLabel}`, ...[...entries].sort((a, b) => a.timestamp - b.timestamp)
@@ -40,7 +40,7 @@ const numeric = (value: unknown) => typeof value === 'number' && Number.isFinite
 
 // Explicit nullable fields and empty collections supplement the persistent initial model.
 // This boundary is strict; normal on-device migration remains tolerant of legacy saves.
-const nullableText = new Set(['targetId', 'assignedJobId', 'assignedDroneId', 'action', 'reason', 'outcome', 'droneId', 'jobId'])
+const nullableText = new Set(['targetId', 'assignedJobId', 'assignedDroneId', 'action', 'reason', 'outcome', 'droneId', 'jobId', 'vesselId', 'lastPhrase'])
 const samples: Record<string, unknown> = {
   activeFaults: { id: '', type: '', severity: '', detectedAt: 0, decisionAt: null, escalatesAt: null, resolvedAt: null, action: null, operationCode: 0, emergency: false },
   repairJobs: { id: '', vesselId: '', faultId: '', method: '', assignedDroneId: null, state: '', createdAt: 0, dispatchedAt: null, serviceStartedAt: null, completedAt: null, nextAt: null, outcome: null },
@@ -49,6 +49,7 @@ const samples: Record<string, unknown> = {
   transcript: { id: '', speaker: '', text: '', timestamp: 0, operationAgeMs: 0, priority: 0 },
 }
 function checkShape(value: unknown, sample: unknown, path: string, field = ''): void {
+  if (field === 'vesselId' && path.startsWith('state.miners[') && value === null) return
   // Schema 3/early schema 4 saves predate the routine-service counter.
   if (field === 'runsSinceService' && value === undefined) return
   if (sample === null) {
@@ -63,8 +64,8 @@ function checkShape(value: unknown, sample: unknown, path: string, field = ''): 
     value.forEach((entry, i) => checkShape(entry, item, `${path}[${i}]`))
   } else if (record(sample)) {
     if (!record(value)) invalid(path)
-    if (field === 'eventCooldowns') {
-      for (const [id, at] of Object.entries(value)) if (!findEvent(id) || !numeric(at)) invalid(path)
+    if (field === 'chatterMemory' || field === 'eventCooldowns') {
+      for (const [id, at] of Object.entries(value)) if ((field === 'eventCooldowns' && !findEvent(id)) || !numeric(at)) invalid(path)
     } else if (field === 'relationships') {
       if (Object.values(value).some((v) => typeof v !== 'string')) invalid(path)
     } else for (const [key, child] of Object.entries(sample)) checkShape(value[key], child, `${path}.${key}`, key)
@@ -78,8 +79,9 @@ function same(a: unknown, b: unknown): boolean {
 }
 
 function legacyMatches(raw: unknown, migrated: unknown, field = ''): boolean {
-  if (field === 'version') return raw === 3 && migrated === 4
+  if (field === 'version') return (raw === 3 || raw === 4) && migrated === 5
   if (field === 'condition' && raw === 'service-required') return migrated === 'nominal'
+  if (field === 'miners' && Array.isArray(raw) && Array.isArray(migrated)) return raw.every((entry) => legacyMatches(entry, migrated.find((crew) => crew.id === entry.id)))
   if (Array.isArray(raw) && Array.isArray(migrated)) return raw.length === migrated.length && raw.every((entry, i) => legacyMatches(entry, migrated[i]))
   if (record(raw) && record(migrated)) return Object.keys(raw).every((key) => legacyMatches(raw[key], migrated[key], key))
   return raw === migrated
@@ -91,12 +93,17 @@ export function parseSave(text: string, now = Date.now()): FacilityState {
   if (!record(envelope) || envelope.format !== SAVE_FORMAT) throw new Error('Not a Horrox portable save. Current operation unchanged.')
   // Portable envelopes support the living-mine schema and its repair successor.
   // Schema 1/2 installation saves still migrate through the normal load path.
-  if (envelope.schemaVersion !== 3 && envelope.schemaVersion !== SAVE_SCHEMA) throw new Error('Unsupported save schema. Supported portable schemas: 3 and 4. Current operation unchanged.')
+  if (envelope.schemaVersion !== 3 && envelope.schemaVersion !== 4 && envelope.schemaVersion !== SAVE_SCHEMA) throw new Error('Unsupported save schema. Supported portable schemas: 3, 4 and 5. Current operation unchanged.')
   if (typeof envelope.appVersion !== 'string' || !envelope.appVersion || !numeric(envelope.milestone)
     || typeof envelope.exportedAt !== 'string' || !Number.isFinite(Date.parse(envelope.exportedAt))) invalid('metadata')
   const raw = envelope.state
   if (!record(raw) || raw.version !== envelope.schemaVersion) invalid('state.version')
   const template = JSON.parse(JSON.stringify(createInitialState(now))) as RecordValue
+  if (raw.version === 3 || raw.version === 4) {
+    delete template.chatterMemory
+    template.miners = (template.miners as RecordValue[]).slice(0, 3)
+    for (const crew of template.miners as RecordValue[]) for (const field of ['department', 'temperament', 'specialty', 'experience', 'radioStyle', 'vesselId', 'lastPhrase']) delete crew[field]
+  }
   if (raw.version === 3) {
     delete template.repairJobs; delete template.nextRepairId
     for (const vessel of template.vessels as RecordValue[]) for (const key of ['routineServiceDue', 'activeFaults', 'serviceHistory', 'operatingRuns', 'lastFaultRun', 'resumeAfterRepair']) delete vessel[key]
@@ -118,7 +125,7 @@ export function parseSave(text: string, now = Date.now()): FacilityState {
     if (!Object.hasOwn(original, 'runsSinceService')) delete vessel.runsSinceService
   }
   if (raw.version === SAVE_SCHEMA && !same(raw, comparable)) invalid('state (values or references)')
-  if (raw.version === 3 && !legacyMatches(raw, migrated)) invalid('state (legacy values or references)')
+  if (raw.version !== SAVE_SCHEMA && !legacyMatches(raw, migrated)) invalid('state (legacy values or references)')
   if (Math.max(raw.lastProcessedAt as number, raw.lastSavedAt as number, raw.lastActiveAt as number) > now) throw new Error('Save clock is ahead of this device. Check the device clock before importing.')
   return migrated
 }
