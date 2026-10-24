@@ -411,7 +411,7 @@ export function shouldBriefOnReturn(state: FacilityState, since: number, now: nu
   const warnings = state.vessels.some((vessel) => activeFaults(vessel).length > 0)
     || state.repairDrones.some((drone) => drone.maintenanceDue)
     || state.systems.berth === 'isolated' || state.systems.coolant === 'inspection' || state.systems.scanner === 'manual-sampling'
-  const meaningfulChange = state.operations.some((entry) => Number(entry.id.replace('op-', '')) >= previousOperationId && entry.category !== 'chatter')
+  const meaningfulChange = state.operations.some((entry) => Number(entry.id.replace('op-', '')) >= previousOperationId && entry.category !== 'chatter' && entry.category !== 'command')
   if (warnings || state.pendingEvent || pendingFaults(state).length || meaningfulChange) return true
   // Briefing age does not turn a momentary, unchanged reconnect into an absence.
   if (now - since < 60_000) return false
@@ -429,7 +429,7 @@ export function absenceReport(event: OperationalEvent): string {
 }
 
 export function recordAbsenceTranscript(state: FacilityState, previousOperationId: number): void {
-  const fresh = state.operations.filter((event) => Number(event.id.replace('op-', '')) >= previousOperationId && event.category !== 'chatter')
+  const fresh = state.operations.filter((event) => Number(event.id.replace('op-', '')) >= previousOperationId && event.category !== 'chatter' && event.category !== 'command')
   state.transcript = [...state.transcript, ...fresh.map((event) => ({
     id: `absence-${event.id}`,
     speaker: state.miners.find((miner) => miner.id === event.source)?.callsign ?? 'Facility Control',
@@ -441,7 +441,7 @@ export function recordAbsenceTranscript(state: FacilityState, previousOperationI
 }
 
 function longAbsenceSummary(state: FacilityState, since: number, now: number): string {
-  const recent = state.operations.filter((event) => event.timestamp > since && event.timestamp <= now && event.category !== 'chatter')
+  const recent = state.operations.filter((event) => event.timestamp > since && event.timestamp <= now && event.category !== 'chatter' && event.category !== 'command')
   const runs = recent.filter((event) => event.operationCode === 112).length
   // Existing saved reports are the durable source for interval totals, including older saves.
   const delivered = recent.filter((event) => event.operationCode === 165).reduce((sum, event) => sum + Number(event.summary.match(/delivered (\d+(?:\.\d+)?) tonnes/)?.[1] ?? 0), 0)
@@ -472,7 +472,7 @@ export function returnBriefing(state: FacilityState, since: number, now: number)
   if (state.pendingEvent) return `Captain terminal connected. A crew request is awaiting your decision. Press 0 to hear the request and choices.`
 
   const elapsed = Number.isFinite(since) ? Math.max(0, now - since) : 0
-  const recent = state.operations.filter((event) => event.timestamp > since && event.category !== 'chatter')
+  const recent = state.operations.filter((event) => event.timestamp > since && event.category !== 'chatter' && event.category !== 'command')
   // Summarize each repair once; the full transit/service sequence belongs in history.
   const completedFaults = new Set(recent.filter((e) => e.operationCode === 245 && e.repair).map((e) => e.repair!.faultId))
   const entries = recent.filter((event, index) => !event.repair || (completedFaults.has(event.repair.faultId)

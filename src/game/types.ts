@@ -163,7 +163,7 @@ export type OperationalEvent = {
   timestamp: number
   operationAgeMs: number
   source: string
-  category: EventType | 'processing'
+  category: EventType | 'processing' | 'command'
   summary: string
   relatedIds: string[]
   actionRequested: boolean

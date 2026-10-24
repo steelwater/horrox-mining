@@ -75,3 +75,19 @@ Critical alerts retain code-first urgency for every speaker. The factual event a
 ## Next action
 
 Run Captain device listening/playtesting and capture a real device transcript. Listen for Deepwell versus Rill across completed runs; confirm both still report identical operational facts. Exercise repairs manually and unattended, background/reopen, export/import, both high-contrast modes and at least 30 minutes of ordinary listening. Cross-app dialogue is deliberately rare; longer sessions are needed. Continue Captain device testing alongside Uplink; record findings before acceptance and merge.
+
+## PR #11 device-review follow-up — 24 October 2026
+
+Authority: Captain's [device review](https://github.com/steelwater/horrox-mining/pull/11#pullrequestreview-5625307551), followed by the instruction to continue implementation. Scope is truthful fault navigation and keypad-attempt auditing; crew-personality architecture and safety scheduling remain unchanged.
+
+- Fault navigation no longer wraps. The last/only fault offers 0 for choices and star to return; # explicitly reports no additional faults. A resolved selection returns to the terminal and directs the Captain to remaining faults when present.
+- Each ready-terminal keypad attempt (0–9, #, *) is a separate `command` Operational History record: Captain actor, wall-clock/station age, key, menu context, accepted/rejected outcome, response and related IDs when available. Inputs before readiness/during import and non-keypad text are excluded. Attempts share the existing 1000-record retention and export format; no separate storage or telemetry is added. Diagnostics and repair events retain their own records/codes. Command audits are excluded from absence reports and summaries.
+- The unreleased schema 5 history category now includes `command`. Earlier milestone saves still migrate; downgrading to an earlier development build may not preserve this new category. Keep a pre-upgrade export for rollback.
+- Coolant responses 1 and 2 pass regression tests; an unsupported key is rejected without consuming the request. The historical 00:54:49 input cannot be reconstructed. New attempts will identify it.
+- Dockside scheduling is unchanged from baseline `45e0492`. Tests prove an already-docked vessel starts service without a redundant approach, while remote vessels record docking before service. The historical excerpts do not establish the starting vessel state, so their exact cause remains unproven; no scheduling change is made.
+- Existing six-hour simulated chatter evidence exercises TS-06 and all RL-01–04, with title/recommendation heard-context, interruption and cooldown tests. Rare absence from a device transcript is not evidence of failure.
+- Frequent characteristic closers are deferred to dialogue polish, as allowed by the earlier review. No new dialogue or cadence change is introduced here.
+
+Verification: 243 tests passed, typecheck and production build passed, diff whitespace check passed. Browser manual testing confirmed coolant rejection followed by acceptance and separate timestamped history attempts. The browser session reset during interruption and its in-memory pre-test export was lost; the current localhost operation was left intact rather than rolled back after further progress. A regression also covers command/result timestamps crossing a millisecond boundary without breaking portable save ordering. Fault navigation combinations and post-resolution behavior are automated checks; physical-device retest remains pending. No lint script exists. The existing Android testing-setup inventory still applies; no native source/toolchain changes were made. Latest-commit Android assembly and web CI must pass before remote review readiness.
+
+Captain device retest and acceptance remain required. Milestone 4 stays open; no merge, release or deployment is authorized.

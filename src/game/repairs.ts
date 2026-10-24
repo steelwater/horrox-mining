@@ -133,7 +133,12 @@ export function vesselRepairStatus(state: FacilityState, vessel: Vessel, fault: 
   return codeReport(fault.operationCode, `${vessel.name}. ${faultLibrary[fault.type].name}. Condition ${vessel.condition.toUpperCase()}. ${job ? `${job.method === 'dock' ? 'Dock repair' : 'Drone support'} ${job.state.replaceAll('-', ' ')}.` : fault.action === 'continue' ? 'Continuing carefully at reduced capacity.' : 'Safe response available.'}`)
 }
 export function repairMenu(state: FacilityState, vessel: Vessel, fault: VesselFault): string {
-  return `${vesselRepairStatus(state, vessel, fault)} ${Object.entries(repairOptions(state, vessel, fault)).map(([key, option]) => `Press ${key} for ${option.label.toLowerCase()}.`).join(' ')} Press # for next vessel fault. Star returns to the main terminal.`
+  const faults = state.vessels.flatMap(activeFaults)
+  const index = faults.findIndex((item) => item.id === fault.id)
+  const navigation = index >= 0 && index < faults.length - 1
+    ? 'Press # for next vessel fault.'
+    : 'No additional vessel faults. Press 0 for current repair choices.'
+  return `${vesselRepairStatus(state, vessel, fault)} ${Object.entries(repairOptions(state, vessel, fault)).map(([key, option]) => `Press ${key} for ${option.label.toLowerCase()}.`).join(' ')} ${navigation} Star returns to the main terminal.`
 }
 export function droneStatus(state: FacilityState): string {
   return state.repairDrones.map((d) => `${d.name}: ${d.state.replaceAll('-', ' ')} at ${d.location}. ${d.targetId ? `Assigned to ${state.vessels.find((v) => v.id === d.targetId)?.name ?? d.targetId}.` : ''} ${d.maintenanceDue ? 'Maintenance required before reuse.' : 'Maintenance current.'}`).join(' ')

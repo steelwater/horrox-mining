@@ -101,6 +101,22 @@ describe('repair resources and lifecycle', () => {
     expect(state.operations.filter((e) => e.operationCode).map((e) => e.operationCode)).toEqual(expect.arrayContaining([205, 215, 220, 225, 230, 245]))
   })
 
+  it('starts service directly only when already docked and records docking before service for remote vessels', () => {
+    for (const docked of [true, false]) {
+      const state = createInitialState(start)
+      commissionFacility(state, start)
+      const vessel = state.vessels[0]!
+      if (docked) { vessel.dockingState = 'docked'; vessel.assignment = 'standby'; vessel.completesAt = null }
+      const fault = detectFault(state, vessel.id, 'cargo-jam', start)!
+      decideRepair(state, vessel, fault, 'dock', start)
+      advanceFacility(state, start + 3 * minute)
+      const codes = state.operations.filter((event) => event.repair?.faultId === fault.id).map((event) => event.operationCode)
+      expect(codes).toContain(230)
+      if (docked) expect(codes).not.toContain(140)
+      else expect(codes.indexOf(140)).toBeLessThan(codes.indexOf(230))
+    }
+  })
+
   it('returns to an isolated berth safely, waits, docks and repairs', () => {
     const { state, vessel, fault } = setup('hull-damage')
     state.systems.berth = 'isolated'

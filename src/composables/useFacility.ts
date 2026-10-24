@@ -108,14 +108,33 @@ export function useFacility() {
   }
 
   async function pressKey(key: KeypadKey): Promise<void> {
-    if (!ready.value || importing.value) return
+    if (!ready.value || importing.value || !/^[0-9*#]$/.test(key)) return
+    const timestamp = Date.now()
+    const fault = state.vessels.flatMap((vessel) => activeFaults(vessel).map((fault) => ({ vessel, fault })))
+      .find(({ fault }) => fault.id === supportFaultId.value)
+    const context = state.onboardingStatus === 'active' ? `readiness step ${state.onboardingStep}`
+      : !state.commissioned ? 'uncommissioned terminal'
+        : supportFaultId.value ? `vessel support ${supportFaultId.value}`
+          : state.pendingEvent ? `request ${state.pendingEvent.eventId}` : 'main terminal'
+    const audit = { outcome: 'accepted', detail: '', relatedIds: fault ? [fault.vessel.id, fault.fault.id] : state.pendingEvent ? [state.pendingEvent.eventId] : [] as string[] }
+    handleKey(key, audit)
+    recordOperation(state, { timestamp, source: 'captain', category: 'command',
+      summary: `Key ${key}. Context: ${context}. Outcome: ${audit.outcome}. ${audit.detail || lastMessage.value}`,
+      relatedIds: audit.relatedIds, actionRequested: false, resolution: 'manual', reason: 'Captain keypad command attempt.' })
+    // Input precedes its result even when processing crosses a millisecond boundary.
+    state.operations.sort((a, b) => a.timestamp - b.timestamp)
+    await persist()
+  }
+
+  function handleKey(key: KeypadKey, audit: { outcome: string; detail: string; relatedIds: string[] }): void {
     audio.cancelChatter()
     const repairAtInput = pendingFaults(state).map(({ fault }) => fault.id)
     const requestAtInput = state.pendingEvent
     tick()
     // An expired response must not become an unrelated top-level command.
     if (((requestAtInput && !state.pendingEvent) || (supportFaultId.value && repairAtInput.includes(supportFaultId.value) && !pendingFaults(state).some(({ fault }) => fault.id === supportFaultId.value))) && key !== '0') {
-      await persist()
+      audit.outcome = 'rejected'
+      audit.detail = 'Response window expired; input was not applied.'
       return
     }
     // Audio permission/resume must not block operational commands or saving.
@@ -124,9 +143,10 @@ export function useFacility() {
 
     if (state.onboardingStatus === 'active') {
       const result = advanceOnboarding(state.onboardingStatus, state.onboardingStep, key)
+      audit.outcome = result.accepted || key === '0' ? 'accepted' : 'rejected'
       if (key === '0') {
         announce(`Captain requested repeat. ${onboardingPrompt(state)}`, 'Facility Control', 'terminal', 2)
-        if (!result.accepted) { await persist(); return }
+        if (!result.accepted) { return }
       }
       if (result.accepted && key === '9') state.autopilotEnabled = true
       state.onboardingStatus = result.status
@@ -137,13 +157,12 @@ export function useFacility() {
       } else {
         announce(`${result.accepted ? '' : 'For this readiness check, '}${onboardingPrompt(state)}`, 'Facility Control', 'terminal', 2)
       }
-      await persist()
       return
     }
 
     if (!state.commissioned) {
+      audit.outcome = key === '0' ? 'accepted' : 'rejected'
       announce(operationalStatus(state), 'Facility Control', 'terminal', 2)
-      await persist()
       return
     }
 
@@ -151,8 +170,8 @@ export function useFacility() {
     let selected = faults.find(({ fault }) => fault.id === supportFaultId.value)
     if (supportFaultId.value && !selected) {
       supportFaultId.value = null
-      announce('Vessel service complete. Main terminal. Press 0 for status.')
-      await persist()
+      audit.outcome = 'rejected'
+      announce('Vessel service complete. Main terminal. Press 0 for status.' + (faults.length ? ' Press 3 for remaining vessel faults.' : ' No additional vessel faults.'))
       return
     }
     if (selected) {
@@ -160,15 +179,22 @@ export function useFacility() {
         supportFaultId.value = null
         announce('Main terminal. Crew response deadlines remain active.')
       } else if (key === '#') {
-        selected = faults[(faults.indexOf(selected) + 1) % faults.length]!
-        supportFaultId.value = selected.fault.id
-        announce(repairMenu(state, selected.vessel, selected.fault), 'Facility Control', 'terminal', 2, { kind: 'request', cause: selected.fault.id })
+        const next = faults[faults.indexOf(selected) + 1]
+        if (next) {
+          selected = next
+          supportFaultId.value = next.fault.id
+          audit.relatedIds = [next.vessel.id, next.fault.id]
+          announce(repairMenu(state, next.vessel, next.fault), 'Facility Control', 'terminal', 2, { kind: 'request', cause: next.fault.id })
+        } else {
+          audit.outcome = 'rejected'
+          announce('No additional vessel faults. Press 0 for current repair choices. Star returns to the main terminal.')
+        }
       } else if (key === '0') announce(repairMenu(state, selected.vessel, selected.fault), 'Facility Control', 'terminal', 2, { kind: 'request', cause: selected.fault.id })
       else {
         const option = repairOptions(state, selected.vessel, selected.fault)[key]
+        if (!option) audit.outcome = 'rejected'
         announce(option ? decideRepair(state, selected.vessel, selected.fault, option.action, Date.now()) : 'That response is unavailable. Press 0 for current repair choices.', 'Facility Control', 'terminal', 2, { kind: 'response', cause: selected.fault.id })
       }
-      await persist()
       return
     }
     const channelFault = key === '1' ? faults.find(({ fault }) => fault.emergency)
@@ -176,13 +202,12 @@ export function useFacility() {
         : key === '4' ? faults.find(({ vessel, fault }) => ['docked', 'approaching', 'returning'].includes(vessel.dockingState) || activeJob(state, fault)?.method === 'dock') : undefined
     if (channelFault) {
       supportFaultId.value = channelFault.fault.id
+      audit.relatedIds = [channelFault.vessel.id, channelFault.fault.id]
       announce(repairMenu(state, channelFault.vessel, channelFault.fault), 'Facility Control', 'terminal', 2, { kind: 'request', cause: channelFault.fault.id })
-      await persist()
       return
     }
     if (key === '8' && faults.length) {
       announce(droneStatus(state))
-      await persist()
       return
     }
 
@@ -197,9 +222,9 @@ export function useFacility() {
       if (message) {
         announce(message, 'Facility Control', 'terminal', 2, { kind: 'response', cause })
       } else {
+        audit.outcome = 'rejected'
         announce('That response is not available for the current request. Press 1 or 2, or allow the crew to decide.', 'Facility Control')
       }
-      await persist()
       return
     }
 
@@ -209,26 +234,28 @@ export function useFacility() {
     } else if (command.type === 'back') {
       announce('Main terminal.', 'Facility Control')
     } else if (command.type === 'confirm') {
-      announce('No confirmation is pending.', 'Facility Control')
+      audit.outcome = 'rejected'
+      announce('No confirmation is pending.' + (!faults.length ? ' No additional vessel faults. Press 0 for status. Star returns to the main terminal.' : ''), 'Facility Control')
     } else if (command.type === 'autopilot') {
       state.autopilotEnabled = nextAutopilotState(state.autopilotEnabled)
       announce(`Autopilot ${state.autopilotEnabled ? 'enabled' : 'disabled'}. ${state.autopilotEnabled ? 'Normal operations will continue. You may listen or interrupt at any time.' : 'Captain input restored.'}`, 'Facility Control', 'terminal', 2)
     } else if (command.type === 'status') {
       announce(operationalStatus(state), 'Facility Control')
     } else {
-      startEvent(command.eventId)
+      if (!startEvent(command.eventId)) audit.outcome = 'rejected'
+      audit.relatedIds = [command.eventId]
     }
-    await persist()
   }
 
-  function startEvent(eventId: string): void {
+  function startEvent(eventId: string): boolean {
     const event = findEvent(eventId)
     if (!event || !beginRequest(state, eventId, Date.now())) {
       announce('That channel has no new report at this time.', 'Facility Control')
-      return
+      return false
     }
     announce(crewReport(state, { source: event.participants[0] ?? 'facility', summary: event.spokenLines.join(' '), category: event.type }), speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority, event.immediateSafety ? undefined : { kind: 'request', cause: `${event.id}:${state.pendingEvent!.requestedAt}` })
     if (event.immediateSafety) announce(state.operations.at(-1)!.summary, 'Facility Control', 'terminal', 1)
+    return true
   }
 
   // Reusable crew → coordinator handoff. Both lines belong to the request,
