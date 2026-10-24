@@ -21,7 +21,7 @@ describe('portable save contract', () => {
     expect(build).toEqual({ version: metadata.version, milestone: metadata.milestone })
     const state = createInitialState(start)
     const envelope = JSON.parse(exportSave(state, start))
-    expect(envelope).toEqual({ format: SAVE_FORMAT, schemaVersion: 4, appVersion: metadata.version, milestone: metadata.milestone, exportedAt: new Date(start).toISOString(), state })
+    expect(envelope).toEqual({ format: SAVE_FORMAT, schemaVersion: 5, appVersion: metadata.version, milestone: metadata.milestone, exportedAt: new Date(start).toISOString(), state })
     expect(parseSave(exportSave(state, start), start)).toEqual(state)
     expect(formatTranscript([])).toContain(buildLabel)
   })
@@ -63,6 +63,9 @@ describe('portable save contract', () => {
   it('imports the historical schema 3 drone shape and migrates to the current state', () => {
     const envelope = JSON.parse(exportSave(createInitialState(start), start))
     envelope.schemaVersion = envelope.state.version = 3
+    delete envelope.state.chatterMemory
+    envelope.state.miners = envelope.state.miners.slice(0, 3)
+    for (const crew of envelope.state.miners) for (const field of ['department', 'temperament', 'specialty', 'experience', 'radioStyle', 'vesselId', 'lastPhrase']) delete crew[field]
     delete envelope.state.repairJobs; delete envelope.state.nextRepairId
     for (const vessel of envelope.state.vessels) for (const key of ['activeFaults', 'serviceHistory', 'operatingRuns', 'lastFaultRun', 'routineServiceDue', 'resumeAfterRepair']) delete vessel[key]
     // Schema 3 (baa962f) predates drone names and repair-assignment metadata.
@@ -74,7 +77,7 @@ describe('portable save contract', () => {
     ['malformed JSON', '{'],
     ['wrong format', JSON.stringify({ format: 'another-game' })],
     ['missing state', JSON.stringify({ format: SAVE_FORMAT, schemaVersion: 4 })],
-    ['future schema', JSON.stringify({ format: SAVE_FORMAT, schemaVersion: 5 })],
+    ['future schema', JSON.stringify({ format: SAVE_FORMAT, schemaVersion: 6 })],
   ])('rejects %s without modifying storage', async (_name, text) => {
     await saveFacility(createInitialState(start))
     const before = storage.value

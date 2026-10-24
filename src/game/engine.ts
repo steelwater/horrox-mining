@@ -1,3 +1,4 @@
+import { autonomyExplanation, miningReporter, updateCrewState } from './crew'
 import { quantity } from './text'
 import { activeFaults, advanceRepairs, detectFault, detectOperationalWear, droneStatus, miningEfficiency, pendingFaults, repairDeadlines, faultLibrary, scheduleRepairs, vesselRepairStatus } from './repairs'
 import { OPERATION_START, operationAgeAt, formatOperationTime } from './calendar'
@@ -70,7 +71,8 @@ export function resolvePendingEvent(
 
 export function createInitialState(now: number): FacilityState {
   return {
-    version: 4,
+    version: 5,
+    chatterMemory: {},
     operationStart: OPERATION_START,
     commissioned: false,
     lastProcessedAt: now,
@@ -223,6 +225,11 @@ export function applyPendingDecision(state: FacilityState, key: KeypadKey | null
       hauler.completesAt = null
     }
   }
+  if (automatic && !event.immediateSafety && source !== 'facility') {
+    const explanation = autonomyExplanation(state.miners.find((crew) => crew.id === source))
+    reason = `${reason} ${explanation}`
+    message = `${message} ${explanation}`
+  }
   recordOperation(state, { timestamp: now, source, category: event.type, summary: message, relatedIds: [...event.participants, ...(event.type === 'mining' ? [vessel.id] : event.type === 'docking' ? [hauler.id, 'berth-04'] : [event.type === 'maintenance' ? 'coolant' : event.type === 'problem' ? 'scanner' : 'berth-04'])], actionRequested: !event.immediateSafety, resolution: automatic || source === 'facility' ? 'autonomous' : 'manual', reason })
   for (const miner of state.miners.filter((item) => event.participants.includes(item.id))) {
     miner.history = [...miner.history, message].slice(-100)
@@ -306,7 +313,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
         vessel.runsSinceService++
         detectOperationalWear(state, vessel, 'extraction', at)
         const canDeliver = miningEfficiency(vessel) > 0
-        routine(state, at, vessel.minerId, 'mining', `${vessel.name} completed extraction run ${vessel.run}. ${canDeliver ? `Returning with ${vessel.cargo} tonnes.` : `Holding ${vessel.cargo} tonnes safely pending repair.`}`, [vessel.id, vessel.minerId], canDeliver ? 'The assigned run is complete. Crew is delivering the cargo.' : 'The assigned run is complete; unsafe transit is suspended.', 112)
+        routine(state, at, miningReporter(state, vessel), 'mining', `${vessel.name} completed extraction run ${vessel.run}. ${canDeliver ? `Returning with ${vessel.cargo} tonnes.` : `Holding ${vessel.cargo} tonnes safely pending repair.`}`, [vessel.id, vessel.minerId], canDeliver ? 'The assigned run is complete. Crew is delivering the cargo.' : 'The assigned run is complete; unsafe transit is suspended.', 112)
       } else if (state.systems.berth === 'isolated') {
         vessel.completesAt = state.systems.berthInspectionAt ?? at + SERVICE_MS
         vessel.dockingState = 'holding'
@@ -349,7 +356,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
     dispatchRoutineService(state, at)
     for (const load of state.processingQueue.filter((q) => q.completesAt <= at)) {
       state.oreProcessed += load.tonnes
-      routine(state, at, 'processor-01', 'processing', `Processor One completed a ${load.tonnes} tonne load.`, [load.vesselId, 'processor-01'], 'Queued processing completed normally.')
+      routine(state, at, 'ada-sen', 'processing', `Processor One completed a ${load.tonnes} tonne load.`, [load.vesselId, 'processor-01'], 'Queued processing completed normally.')
     }
     state.processingQueue = state.processingQueue.filter((q) => q.completesAt > at)
     state.lastProcessedAt = at
@@ -378,6 +385,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
   // Calendar age includes the skipped interval; only operational work is bounded.
   state.facilityAgeMs += now - state.lastProcessedAt
   state.lastProcessedAt = now
+  updateCrewState(state)
 }
 
 export const COMMISSIONING_NOTICE = 'Facility not commissioned. Normal operations have not started, so no operational events are generated. Select Readiness Check to start or resume commissioning, then complete or delegate the checks.'
@@ -403,7 +411,7 @@ export function shouldBriefOnReturn(state: FacilityState, since: number, now: nu
   const warnings = state.vessels.some((vessel) => activeFaults(vessel).length > 0)
     || state.repairDrones.some((drone) => drone.maintenanceDue)
     || state.systems.berth === 'isolated' || state.systems.coolant === 'inspection' || state.systems.scanner === 'manual-sampling'
-  const meaningfulChange = state.operations.some((entry) => Number(entry.id.replace('op-', '')) >= previousOperationId && entry.category !== 'chatter')
+  const meaningfulChange = state.operations.some((entry) => Number(entry.id.replace('op-', '')) >= previousOperationId && entry.category !== 'chatter' && entry.category !== 'command')
   if (warnings || state.pendingEvent || pendingFaults(state).length || meaningfulChange) return true
   // Briefing age does not turn a momentary, unchanged reconnect into an absence.
   if (now - since < 60_000) return false
@@ -421,7 +429,7 @@ export function absenceReport(event: OperationalEvent): string {
 }
 
 export function recordAbsenceTranscript(state: FacilityState, previousOperationId: number): void {
-  const fresh = state.operations.filter((event) => Number(event.id.replace('op-', '')) >= previousOperationId && event.category !== 'chatter')
+  const fresh = state.operations.filter((event) => Number(event.id.replace('op-', '')) >= previousOperationId && event.category !== 'chatter' && event.category !== 'command')
   state.transcript = [...state.transcript, ...fresh.map((event) => ({
     id: `absence-${event.id}`,
     speaker: state.miners.find((miner) => miner.id === event.source)?.callsign ?? 'Facility Control',
@@ -433,7 +441,7 @@ export function recordAbsenceTranscript(state: FacilityState, previousOperationI
 }
 
 function longAbsenceSummary(state: FacilityState, since: number, now: number): string {
-  const recent = state.operations.filter((event) => event.timestamp > since && event.timestamp <= now && event.category !== 'chatter')
+  const recent = state.operations.filter((event) => event.timestamp > since && event.timestamp <= now && event.category !== 'chatter' && event.category !== 'command')
   const runs = recent.filter((event) => event.operationCode === 112).length
   // Existing saved reports are the durable source for interval totals, including older saves.
   const delivered = recent.filter((event) => event.operationCode === 165).reduce((sum, event) => sum + Number(event.summary.match(/delivered (\d+(?:\.\d+)?) tonnes/)?.[1] ?? 0), 0)
@@ -464,7 +472,7 @@ export function returnBriefing(state: FacilityState, since: number, now: number)
   if (state.pendingEvent) return `Captain terminal connected. A crew request is awaiting your decision. Press 0 to hear the request and choices.`
 
   const elapsed = Number.isFinite(since) ? Math.max(0, now - since) : 0
-  const recent = state.operations.filter((event) => event.timestamp > since && event.category !== 'chatter')
+  const recent = state.operations.filter((event) => event.timestamp > since && event.category !== 'chatter' && event.category !== 'command')
   // Summarize each repair once; the full transit/service sequence belongs in history.
   const completedFaults = new Set(recent.filter((e) => e.operationCode === 245 && e.repair).map((e) => e.repair!.faultId))
   const entries = recent.filter((event, index) => !event.repair || (completedFaults.has(event.repair.faultId)

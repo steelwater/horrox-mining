@@ -23,7 +23,7 @@ describe('operational chatter', () => {
     decideRepair(state, state.vessels[0]!, state.vessels[0]!.activeFaults[0]!, 'drone', start)
     advanceFacility(state, start + 3 * minute)
     expect(chatterContextMatches(state, exchange)).toBe(false)
-    expect(chatterContextMatches(state, chatter.find((e) => e.context === 'service')!)).toBe(true)
+    expect(eligibleChatter(state, start + 3 * minute)).toEqual([])
     expect(chatterContextMatches(state, chatter.find((e) => e.context === 'maintenance')!)).toBe(false)
   })
 
@@ -44,13 +44,13 @@ describe('operational chatter', () => {
 
   it('preserves long exchange cooldowns through export/import and transcript rollover', () => {
     const state = operation()
-    const exchange = chatter[0]!
+    const exchange = chatter.find((item) => item.id === 'productive-confidence')!
     recordOperation(state, { timestamp: start + minute, source: 'Patch', category: 'chatter', summary: exchange.lines[0]!.text, relatedIds: [exchange.id], actionRequested: false, resolution: 'autonomous', reason: null })
     advanceFacility(state, start + minute)
     const restored = parseSave(exportSave(state), start + minute)
     expect(eligibleChatter(restored, start + 10 * minute).some((e) => e.id === exchange.id)).toBe(false)
     expect(eligibleChatter(restored, start + 61 * minute).some((e) => e.id === exchange.id)).toBe(true)
-    expect(restored.version).toBe(4)
+    expect(restored.version).toBe(5)
   })
 
   it('keeps a two-hour unattended transcript varied with no short repeat loops', () => {

@@ -209,7 +209,7 @@ describe('decisions and operational record', () => {
 describe('save integrity and established voice', () => {
   it('migrates the original counters, pending request, onboarding and history without retroactive production', () => {
     const state = migrateFacility({ version: 1, createdAt: start, lastSavedAt: start, oreProcessed: 144, history: ['existing history'], onboardingStatus: 'active', onboardingStep: 4, pendingEvent: { eventId: 'docking-hauler-two', requestedAt: start } }, start)
-    expect(state.version).toBe(4)
+    expect(state.version).toBe(5)
     expect(state.oreProcessed).toBe(144)
     expect(state.history).toEqual(['existing history'])
     expect(state.onboardingStep).toBe(0)

@@ -1,3 +1,4 @@
+import { crossAppChatter } from './crossAppChatter'
 import { operationAgeAt } from './calendar'
 import { activeFaults, pendingFaults } from './repairs'
 import type { ChatterExchange, FacilityState } from './types'
@@ -6,6 +7,14 @@ const MINUTE = 60_000
 // Prototype dialogue, pending content-owner approval. Contexts describe real work,
 // not personality or mood. No early-arrival claim exists without an early-arrival model.
 export const chatter: ChatterExchange[] = [
+  ...crossAppChatter,
+  { id: 'sampling-patience', context: 'mining', cooldownMs: 30 * MINUTE, lines: [
+    { speaker: 'Rill', profile: 'bright', text: 'Deepwell, does checking the same reading twice count as patience?' },
+    { speaker: 'Deepwell', profile: 'measured', text: 'Only if you leave time between the checks.' },
+  ] },
+  { id: 'sampling-sequence', context: 'mining', cooldownMs: 40 * MINUTE, lines: [
+    { speaker: 'Rill', profile: 'bright', text: 'Sample, record, then move on. I like a sequence that tells you when you are finished.' },
+  ] },
   { id: 'productive-confidence', context: 'mining', cooldownMs: 60 * MINUTE, lines: [
     { speaker: 'Patch', profile: 'bright', text: 'Deepwell, your excavator is making that noise again.' },
     { speaker: 'Deepwell', profile: 'measured', text: 'That noise is called productive confidence.' },
@@ -71,49 +80,64 @@ export const chatter: ChatterExchange[] = [
   { id: 'unexciting-machinery', context: 'maintenance', cooldownMs: 40 * MINUTE, lines: [
     { speaker: 'Patch', profile: 'bright', text: 'Unexciting machinery. That is what I want from the rest of this shift.' },
   ] },
-  { id: 'service-patience', context: 'service', cooldownMs: 35 * MINUTE, lines: [
-    { speaker: 'Patch', profile: 'bright', text: 'Service is underway. This is where patience does more useful work than encouragement.' },
-  ] },
-  { id: 'service-space', context: 'service', cooldownMs: 40 * MINUTE, lines: [
-    { speaker: 'Patch', profile: 'bright', text: 'Giving the service equipment room to work. Supervision does not require standing in the way.' },
-  ] },
-  { id: 'service-shortcut', context: 'service', cooldownMs: 45 * MINUTE, lines: [
-    { speaker: 'Patch', profile: 'bright', text: 'There is a shortcut to almost every repair. Usually it leads back to doing the repair properly.' },
-  ] },
-  { id: 'service-finish', context: 'service', cooldownMs: 40 * MINUTE, lines: [
-    { speaker: 'Patch', profile: 'bright', text: 'Still servicing. I prefer to announce finished after the equipment agrees with me.' },
-  ] },
+
 ]
 
 export function chatterContextMatches(state: FacilityState, exchange: ChatterExchange): boolean {
   const excavator = state.vessels.find((v) => v.id === 'excavator-03')
   const hauler = state.vessels.find((v) => v.id === 'hauler-02')
   switch (exchange.context) {
+    case 'quiet': return state.systems.coolant === 'nominal' && state.systems.scanner === 'nominal'
+    case 'transfer': return state.vessels.some((v) => v.id === state.miners.find((crew) => crew.id === 'tess-oren')?.vesselId && v.assignment === 'delivery' && v.dockingState === 'returning' && !activeFaults(v).length)
     case 'mining': return !!excavator && excavator.assignment === 'extraction' && excavator.dockingState === 'deployed' && !excavator.routineServiceDue && !activeFaults(excavator).length
     case 'dock': return state.systems.berth === 'open' && hauler?.dockingState === 'docked' && !activeFaults(hauler).length && !state.repairJobs.some((j) => j.method === 'dock' && j.state !== 'complete')
     case 'processing': return state.processingQueue.length > 0 && state.systems.coolant === 'nominal' && state.systems.scanner === 'nominal'
     case 'maintenance': return state.vessels.every((v) => !activeFaults(v).length && !v.routineServiceDue) && state.repairDrones.every((d) => d.state === 'available' && !d.maintenanceDue) && state.systems.coolant === 'nominal' && state.systems.scanner === 'nominal'
-    case 'service': return state.repairJobs.some((j) => j.state === 'servicing')
   }
 }
 
 export function eligibleChatter(state: FacilityState, now: number): ChatterExchange[] {
   if (!state.commissioned || state.onboardingStatus === 'active' || state.pendingEvent || pendingFaults(state).length
-    || state.systems.berth !== 'open' || state.vessels.some((v) => activeFaults(v).some((f) => f.emergency)
-      || ['approaching', 'returning'].includes(v.dockingState))) return []
+    || state.systems.berth !== 'open' || state.systems.coolant !== 'nominal' || state.systems.scanner !== 'nominal'
+    || state.repairJobs.some((j) => j.state !== 'complete')
+    || state.repairDrones.some((d) => d.state !== 'available' || d.maintenanceDue)
+    || state.vessels.some((v) => activeFaults(v).length || v.routineServiceDue || v.dockingState === 'approaching')) return []
   const age = operationAgeAt(state, now)
   const traffic = state.transcript.filter((e) => e.priority < 5).at(-1)
   const operation = state.operations.filter((e) => e.category !== 'chatter').at(-1)
   if (age - Math.max(traffic?.operationAgeMs ?? 0, operation?.operationAgeMs ?? 0) < 30_000) return []
   // History retains cooldowns even when the shorter visible transcript rolls over.
   const heard = state.operations.filter((e) => e.category === 'chatter')
-  const lastAmbient = Math.max(heard.at(-1)?.operationAgeMs ?? -Infinity,
+  const lastAmbient = Math.max(state.chatterMemory.ambient ?? -Infinity, heard.at(-1)?.operationAgeMs ?? -Infinity,
     state.transcript.filter((e) => e.priority === 5).at(-1)?.operationAgeMs ?? -Infinity)
   if (age - lastAmbient < 2 * MINUTE) return []
   return chatter.filter((exchange) => {
-    const last = heard.filter((e) => e.relatedIds.includes(exchange.id)).at(-1)?.operationAgeMs
+    const last = state.chatterMemory[exchange.id] ?? heard.filter((e) => e.relatedIds.includes(exchange.id)).at(-1)?.operationAgeMs
       ?? state.transcript.filter((e) => e.priority === 5 && exchange.lines.some((line) => line.text === e.text)).at(-1)?.operationAgeMs
       ?? -Infinity
+    if (exchange.pack) {
+      const memory = state.chatterMemory
+      if (age < 15 * MINUTE || age - Math.max(memory['pack:TS'] ?? -Infinity, memory['pack:RL'] ?? -Infinity) < 45 * MINUTE) return false
+      if (exchange.pack === 'RL' && memory['heard:TS'] === undefined) return false
+      if (exchange.requires && memory[`heard:${exchange.requires}`] === undefined) return false
+      // Leave room to finish a rare exchange before a known vessel/processing transition.
+      if (state.vessels.some((v) => v.completesAt !== null && v.completesAt - now < 60_000)
+        || state.processingQueue.some((load) => load.completesAt - now < 60_000)) return false
+      if (state.vessels.some((v) => v.dockingState === 'returning') && exchange.context !== 'transfer') return false
+    } else if (state.vessels.some((v) => v.dockingState === 'returning')) return false
     return age - last >= exchange.cooldownMs && chatterContextMatches(state, exchange)
   })
+}
+
+/** Record only when a line actually starts. Canceled exchanges are not replayed as a backlog. */
+export function rememberChatter(state: FacilityState, exchange: ChatterExchange, now: number): void {
+  const age = operationAgeAt(state, now)
+  state.chatterMemory[exchange.id] = age
+  state.chatterMemory.ambient = age
+  if (exchange.pack) state.chatterMemory[`pack:${exchange.pack}`] = age
+}
+
+export function rememberChatterContext(state: FacilityState, exchange: ChatterExchange, now: number): void {
+  // Called at the final line: the title/recommendation has already been heard, even if this tail is interrupted.
+  if (exchange.pack) state.chatterMemory[`heard:${exchange.pack === 'TS' ? 'TS' : exchange.id}`] = operationAgeAt(state, now)
 }
