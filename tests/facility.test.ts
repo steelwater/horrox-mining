@@ -62,6 +62,8 @@ describe('spoken terminal commands', () => {
     expect(attempts).toHaveLength(5)
     expect(attempts.filter((entry) => entry.summary.startsWith('Key 1.'))).toHaveLength(2)
     expect(facility.state.operations.filter((entry) => entry.operationCode === 201)).toHaveLength(2)
+    expect(facility.state.repairJobs).toHaveLength(1)
+    expect(speech.speak.mock.calls.filter(([text]) => text.includes('Repair already authorized.'))).toHaveLength(2)
     expect(attempts.at(-1)).toMatchObject({ source: 'captain', relatedIds: ['excavator-03', fault.id], resolution: 'manual' })
     expect(attempts.at(-1)!.summary).toContain('Outcome: rejected')
     expect(attempts.at(-1)!.summary).toContain(`Context: vessel support ${fault.id}`)
@@ -92,11 +94,11 @@ describe('spoken terminal commands', () => {
     facility.state.onboardingStatus = 'complete'
     await facility.pressKey('5')
     await facility.pressKey('#')
-    expect(facility.state.operations.at(-1)!.summary).toContain('Outcome: rejected')
+    expect(facility.state.operations.filter((entry) => entry.category === 'command').at(-1)!.summary).toContain('Outcome: rejected')
     expect(facility.state.pendingEvent).not.toBeNull()
     await facility.pressKey(key)
     expect(facility.state.pendingEvent).toBeNull()
-    expect(facility.state.operations.at(-1)!.summary).toContain('Outcome: accepted')
+    expect(facility.state.operations.filter((entry) => entry.category === 'command').at(-1)!.summary).toContain('Outcome: accepted')
   })
 
   it('offers both high-contrast modes and restores the visible terminal from black screen without changing the operation', () => {

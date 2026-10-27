@@ -80,6 +80,67 @@ describe('vessel faults and safe decisions', () => {
 })
 
 describe('repair resources and lifecycle', () => {
+  it('reports diagnostics through authorization, transit, service and completion without rescheduling', () => {
+    const { state, vessel, fault } = setup()
+    const deadline = fault.decisionAt
+    const initial = decideRepair(state, vessel, fault, 'diagnostics', start)
+    expect(initial).toContain(faultLibrary[fault.type].diagnostics)
+    expect(initial).toContain(faultLibrary[fault.type].requirements)
+    expect(initial).not.toContain('already authorized')
+    expect(state.repairJobs).toHaveLength(0)
+    expect(fault.decisionAt).toBe(deadline)
+    decideRepair(state, vessel, fault, 'drone', start)
+    const drone = state.repairDrones[0]!
+    for (const [elapsed, stage] of [[0, `${drone.name} assigned and dispatched`], [1_000, `${drone.name} en route`], [2 * minute + 1_000, `${drone.name} servicing ${vessel.name}`]] as const) {
+      advanceFacility(state, start + elapsed)
+      const jobs = structuredClone(state.repairJobs)
+      for (let repeat = 0; repeat < 2; repeat++) {
+        const report = decideRepair(state, vessel, fault, 'diagnostics', start + elapsed)
+        expect(report).toContain(stage)
+        expect(report).toContain('Repair already authorized.')
+        expect(report).toContain('No further Captain action is required')
+        expect(report).toContain(faultLibrary[fault.type].requirements)
+      }
+      expect(state.repairJobs).toEqual(jobs)
+      expect(fault.decisionAt).toBeNull()
+      expect(state.operations.at(-1)?.repair?.jobId).toBe(jobs[0]!.id)
+    }
+    advanceFacility(state, start + 6 * minute + 1_000)
+    expect(decideRepair(state, vessel, fault, 'diagnostics', start + 6 * minute + 1_000)).toBe(`${vessel.name}: service already complete.`)
+    expect(state.repairJobs).toHaveLength(1)
+  })
+
+  it('reports authorized waiting without claiming an assigned worker or requesting another decision', () => {
+    const { state, vessel, fault } = setup()
+    state.repairDrones[0]!.state = 'unavailable'
+    decideRepair(state, vessel, fault, 'drone', start)
+    const jobs = structuredClone(state.repairJobs)
+    const report = decideRepair(state, vessel, fault, 'diagnostics', start)
+    expect(report).toContain('Waiting for available repair resources. Service has not started.')
+    expect(report).toContain('Repair already authorized.')
+    expect(report).toContain('No further Captain action is required')
+    expect(report).not.toContain(state.repairDrones[0]!.name)
+    expect(state.repairJobs).toEqual(jobs)
+  })
+
+  it('distinguishes recovery, berth waiting and dockside workers in diagnostics', () => {
+    const { state, vessel, fault } = setup('cargo-jam')
+    decideRepair(state, vessel, fault, 'drone', start)
+    advanceFacility(state, start + 2 * minute + 1_000)
+    expect(decideRepair(state, vessel, fault, 'diagnostics', state.lastProcessedAt)).toContain(`${state.repairDrones[0]!.name} providing recovery support.`)
+    advanceFacility(state, start + 4 * minute + 1_000)
+    expect(decideRepair(state, vessel, fault, 'diagnostics', state.lastProcessedAt)).toContain('Docking for dockside service.')
+    state.systems.berth = 'isolated'
+    state.systems.berthInspectionAt = start + 8 * minute
+    advanceFacility(state, start + 5 * minute + 1_000)
+    expect(decideRepair(state, vessel, fault, 'diagnostics', state.lastProcessedAt)).toContain('Waiting for berth clearance')
+    advanceFacility(state, start + 8 * minute)
+    const report = decideRepair(state, vessel, fault, 'diagnostics', state.lastProcessedAt)
+    expect(report).toContain(`Dockside crew servicing ${vessel.name}.`)
+    expect(report).not.toContain(`${state.repairDrones[0]!.name} servicing`)
+    expect(state.repairJobs).toHaveLength(1)
+  })
+
   it('reserves a remote drone through dispatch, transit, service and return', () => {
     const { state, vessel, fault } = setup()
     decideRepair(state, vessel, fault, 'drone', start)

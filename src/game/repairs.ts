@@ -144,10 +144,27 @@ export function droneStatus(state: FacilityState): string {
   return state.repairDrones.map((d) => `${d.name}: ${d.state.replaceAll('-', ' ')} at ${d.location}. ${d.targetId ? `Assigned to ${state.vessels.find((v) => v.id === d.targetId)?.name ?? d.targetId}.` : ''} ${d.maintenanceDue ? 'Maintenance required before reuse.' : 'Maintenance current.'}`).join(' ')
 }
 
+function diagnosticProgress(state: FacilityState, vessel: Vessel, job: RepairJob): string {
+  const drone = state.repairDrones.find((item) => item.id === job.assignedDroneId)
+  switch (job.state) {
+    case 'waiting': return 'Waiting for available repair resources. Service has not started.'
+    case 'dispatched': return `${drone!.name} assigned and dispatched. Service has not started.`
+    case 'in-transit': return `${drone!.name} en route. Service has not started.`
+    case 'returning-vessel': return `Returning for dockside service.${drone ? ` ${drone.name} providing recovery support.` : ''} Service has not started.`
+    case 'docking': return `${vessel.dockingState === 'holding' ? 'Waiting for berth clearance' : 'Docking'} for dockside service. Service has not started.`
+    case 'servicing': return `${job.method === 'dock' ? 'Dockside crew' : drone!.name} servicing ${vessel.name}.`
+    case 'complete': return 'Service complete.'
+  }
+}
+
 export function decideRepair(state: FacilityState, vessel: Vessel, fault: VesselFault, action: RepairAction, at: number, actor = 'captain'): string {
   if (fault.resolvedAt !== null) return `${vessel.name}: service already complete.`
   if (fault.decisionAt !== null && at >= fault.decisionAt && actor === 'captain') return decideRepair(state, vessel, fault, 'crew', at, 'facility')
-  if (action === 'diagnostics') return log(state, vessel, fault, at, 201, `${vessel.name}. ${faultDiagnostics(vessel, fault.type)} Required: ${faultLibrary[fault.type].requirements}.`, actor, action)
+  if (action === 'diagnostics') {
+    const job = activeJob(state, fault)
+    const progress = job ? ` Repair already authorized. ${diagnosticProgress(state, vessel, job)} No further Captain action is required for this repair.` : ''
+    return log(state, vessel, fault, at, 201, `${vessel.name}. ${faultDiagnostics(vessel, fault.type)} Service requirement: ${faultLibrary[fault.type].requirements}.${progress}`, actor, action, null, job)
+  }
   if (action === 'recommend') return recommendation(state, vessel, fault).text
   if (activeJob(state, fault)) return vesselRepairStatus(state, vessel, fault)
   if (action === 'continue' && (miningEfficiency(vessel) === 0 || !['deployed', 'returning'].includes(vessel.dockingState))) return 'Continued work is not safe. Request the Facility recommendation.'
