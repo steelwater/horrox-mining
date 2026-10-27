@@ -82,7 +82,7 @@ export class AudioDirector {
     if (this.speaking || this.stopping || this.exchangeTimer !== null || this.queue.length || !lines.length) return false
     let next: SpeechRequest | undefined
     for (const line of [...lines].reverse()) {
-      next = { text: line.text, profileId: line.profile, priority: 5, onStart: () => onLine(line), next }
+      next = { text: line.text.replaceAll('C.A.R.L.', 'C. A. R. L.'), profileId: line.profile, priority: 5, onStart: () => onLine(line), next }
     }
     this.enqueue(next!)
     return true
@@ -100,7 +100,7 @@ export class AudioDirector {
     const nativeSpeech = canUseNativeSpeech()
 
     if (priority < 5) this.cancelChatter()
-    if (this.speaking && this.currentPriority !== null && priority === 1 && this.currentPriority !== 1) {
+    if (this.speaking && this.currentPriority !== null && ((priority === 1 && this.currentPriority !== 1) || (priority < 5 && this.currentPriority === 5))) {
       this.queue.unshift(request)
       // Preserve interrupted operational context so its answer cannot become orphaned.
       if (this.currentRequest?.context) this.queue.push(this.currentRequest)

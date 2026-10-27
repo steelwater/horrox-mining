@@ -47,6 +47,7 @@ export const voiceProfiles: VoiceProfile[] = [
 export const miners: Miner[] = [
   {
     id: 'mara-vale',
+    department: 'Docking', temperament: 'protective', specialty: 'traffic control', experience: 'veteran', radioStyle: 'code-first', vesselId: 'hauler-02', lastPhrase: null,
     name: 'Mara Vale',
     callsign: 'Latch',
     role: 'Docking lead',
@@ -62,6 +63,7 @@ export const miners: Miner[] = [
   },
   {
     id: 'iko-ren',
+    department: 'Maintenance', temperament: 'curious', specialty: 'sensor repair', experience: 'established', radioStyle: 'conversational', vesselId: null, lastPhrase: null,
     name: 'Iko Ren',
     callsign: 'Patch',
     role: 'Maintenance engineer',
@@ -77,6 +79,7 @@ export const miners: Miner[] = [
   },
   {
     id: 'sol-arden',
+    department: 'Mining', temperament: 'patient', specialty: 'excavation', experience: 'veteran', radioStyle: 'code-first', vesselId: 'excavator-03', lastPhrase: null,
     name: 'Sol Arden',
     callsign: 'Deepwell',
     role: 'Extraction operator',
@@ -91,6 +94,25 @@ export const miners: Miner[] = [
     history: [],
   },
 ]
+
+
+// Authored prototype personnel, pending Dan/content-owner review. No new vessels or departments simulated.
+const supportingCrew: Array<Pick<Miner, 'id' | 'name' | 'callsign' | 'department' | 'role' | 'temperament' | 'specialty' | 'experience' | 'radioStyle' | 'vesselId' | 'voiceProfileId'>> = [
+  { id: 'tess-oren', name: 'Tess Oren', callsign: 'Rill', department: 'Mining', role: 'Extraction survey operator', temperament: 'methodical', specialty: 'ore sampling', experience: 'newcomer', radioStyle: 'plain-first', vesselId: 'excavator-03', voiceProfileId: 'bright' },
+  { id: 'ada-sen', name: 'Ada Sen', callsign: 'Sieve', department: 'Refinery', role: 'Refinery operator', temperament: 'precise', specialty: 'processing', experience: 'established', radioStyle: 'plain-first', vesselId: null, voiceProfileId: 'measured' },
+  { id: 'noor-ven', name: 'Noor Ven', callsign: 'Facet', department: 'Grading', role: 'Grading operator', temperament: 'reserved', specialty: 'grade assessment', experience: 'veteran', radioStyle: 'code-first', vesselId: null, voiceProfileId: 'steady' },
+  { id: 'eli-moss', name: 'Eli Moss', callsign: 'Ledger', department: 'Storage', role: 'Storage custodian', temperament: 'careful', specialty: 'inventory', experience: 'established', radioStyle: 'plain-first', vesselId: null, voiceProfileId: 'measured' },
+  { id: 'bea-kade', name: 'Bea Kade', callsign: 'Crate', department: 'Cargo', role: 'Cargo Mech supervisor', temperament: 'dry-witted', specialty: 'cargo handling', experience: 'veteran', radioStyle: 'conversational', vesselId: null, voiceProfileId: 'steady' },
+  { id: 'oren-dax', name: 'Oren Dax', callsign: 'Keel', department: 'Transport', role: 'Transport pilot', temperament: 'practical', specialty: 'transport navigation', experience: 'veteran', radioStyle: 'code-first', vesselId: 'hauler-02', voiceProfileId: 'measured' },
+]
+miners.push(...supportingCrew.map((crew): Miner => ({
+  ...crew, personalityTraits: [crew.temperament], speechHabits: [crew.radioStyle],
+  preferredCoworkers: crew.id === 'tess-oren' ? ['sol-arden'] : [],
+  relationships: crew.id === 'tess-oren' ? { 'sol-arden': 'trusted sampling mentor' } : {},
+  competenceAreas: [crew.specialty], currentMood: 'settled',
+  currentAssignment: crew.vesselId ? 'Assigned vessel support' : `${crew.department} standby`,
+  lastPhrase: null, history: [],
+})))
 
 export const events: EventDefinition[] = [
   {

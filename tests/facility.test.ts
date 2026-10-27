@@ -6,15 +6,100 @@ vi.mock('../src/audio/audioDirector', () => ({ AudioDirector: class { constructo
 vi.mock('../src/game/persistence', async (original) => ({ ...await original<typeof import('../src/game/persistence')>(), loadFacility: vi.fn().mockResolvedValue(null), saveFacility: vi.fn().mockResolvedValue(undefined), replaceFacility: vi.fn() }))
 vi.mock('vue', async (original) => ({ ...await original<typeof import('vue')>(), onMounted: (callback: () => void) => lifecycle.mounted.push(callback), onBeforeUnmount: (callback: () => void) => lifecycle.unmounted.push(callback) }))
 import { useFacility } from '../src/composables/useFacility'
-import { loadFacility, saveFacility, replaceFacility } from '../src/game/persistence'
+import { loadFacility, saveFacility, replaceFacility, migrateFacility } from '../src/game/persistence'
 import { commissionFacility, createInitialState, operationalStatus, returnBriefing, restoreState } from '../src/game/engine'
 import { detectFault } from '../src/game/repairs'
-import { exportSave } from '../src/game/portableSave'
+import { exportSave, parseSave } from '../src/game/portableSave'
 import { onboardingSteps } from '../src/game/onboarding'
 
 describe('spoken terminal commands', () => {
   beforeEach(() => { vi.clearAllMocks(); lifecycle.mounted = []; lifecycle.unmounted = [] })
   afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
+
+  it('stops fault navigation at the last fault and updates prompts after resolution', async () => {
+    const facility = useFacility()
+    facility.ready.value = true
+    commissionFacility(facility.state, Date.now())
+    facility.state.onboardingStatus = 'complete'
+    await facility.pressKey('#')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('No additional vessel faults')
+    const first = detectFault(facility.state, 'excavator-03', 'sensor-degradation', Date.now())!
+    await facility.pressKey('3')
+    expect(speech.speak.mock.calls.at(-1)![0]).not.toContain('Press #')
+    await facility.pressKey('#')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('No additional vessel faults')
+    const second = detectFault(facility.state, 'hauler-02', 'sensor-degradation', Date.now())!
+    await facility.pressKey('0')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Press #')
+    await facility.pressKey('#')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Hauler Two')
+    expect(speech.speak.mock.calls.at(-1)![0]).not.toContain('Press #')
+    await facility.pressKey('#')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('No additional vessel faults')
+    second.resolvedAt = Date.now()
+    await facility.pressKey('0')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Press 3 for remaining vessel faults')
+    await facility.pressKey('3')
+    first.resolvedAt = Date.now()
+    await facility.pressKey('0')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('No additional vessel faults')
+  })
+
+  it('audits repeated diagnostics and rejected repair keys once per attempt and preserves them in saves', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_800_000_000_000)
+    const facility = useFacility()
+    facility.ready.value = true
+    commissionFacility(facility.state, Date.now())
+    facility.state.onboardingStatus = 'complete'
+    const fault = detectFault(facility.state, 'excavator-03', 'sensor-degradation', Date.now())!
+    await facility.pressKey('3')
+    await facility.pressKey('2') // Service underway: only diagnostics/recommendation remain.
+    await facility.pressKey('1')
+    await facility.pressKey('1')
+    await facility.pressKey('2')
+    const attempts = facility.state.operations.filter((entry) => entry.category === 'command')
+    expect(attempts).toHaveLength(5)
+    expect(attempts.filter((entry) => entry.summary.startsWith('Key 1.'))).toHaveLength(2)
+    expect(facility.state.operations.filter((entry) => entry.operationCode === 201)).toHaveLength(2)
+    expect(facility.state.repairJobs).toHaveLength(1)
+    expect(speech.speak.mock.calls.filter(([text]) => text.includes('Repair already authorized.'))).toHaveLength(2)
+    expect(attempts.at(-1)).toMatchObject({ source: 'captain', relatedIds: ['excavator-03', fault.id], resolution: 'manual' })
+    expect(attempts.at(-1)!.summary).toContain('Outcome: rejected')
+    expect(attempts.at(-1)!.summary).toContain(`Context: vessel support ${fault.id}`)
+    expect(migrateFacility(JSON.parse(exportSave(facility.state)).state, Date.now())).toEqual(JSON.parse(exportSave(facility.state)).state)
+    expect(parseSave(exportSave(facility.state)).operations).toEqual(facility.state.operations)
+    expect(speech.speak.mock.calls.some(([text]) => text.startsWith('Key '))).toBe(false)
+    await facility.pressKey('private text' as '0')
+    expect(facility.state.operations.filter((entry) => entry.category === 'command')).toHaveLength(5)
+  })
+
+  it('round-trips command history when processing advances beyond the input timestamp', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(1_800_000_000_000)
+    const facility = useFacility()
+    facility.ready.value = true
+    commissionFacility(facility.state, Date.now())
+    facility.state.onboardingStatus = 'complete'
+    speech.playKeyTone.mockImplementationOnce(() => vi.setSystemTime(Date.now() + 10))
+    await facility.pressKey('5')
+    expect(parseSave(exportSave(facility.state)).operations).toEqual(facility.state.operations)
+    expect(facility.state.operations.find((entry) => entry.category === 'command')!.timestamp).toBe(1_800_000_000_000)
+  })
+
+  it.each(['1', '2'] as const)('accepts coolant response %s and records an unsupported key without consuming the request', async (key) => {
+    const facility = useFacility()
+    facility.ready.value = true
+    commissionFacility(facility.state, Date.now())
+    facility.state.onboardingStatus = 'complete'
+    await facility.pressKey('5')
+    await facility.pressKey('#')
+    expect(facility.state.operations.filter((entry) => entry.category === 'command').at(-1)!.summary).toContain('Outcome: rejected')
+    expect(facility.state.pendingEvent).not.toBeNull()
+    await facility.pressKey(key)
+    expect(facility.state.pendingEvent).toBeNull()
+    expect(facility.state.operations.filter((entry) => entry.category === 'command').at(-1)!.summary).toContain('Outcome: accepted')
+  })
 
   it('offers both high-contrast modes and restores the visible terminal from black screen without changing the operation', () => {
     const facility = useFacility()
@@ -314,7 +399,8 @@ describe('spoken terminal commands', () => {
     vi.setSystemTime(Date.now() + 300_000)
     await facility.pressKey('1')
     expect(facility.state.systems.berth).toBe('open')
-    expect(facility.state.operations.at(-1)?.resolution).toBe('autonomous')
+    expect(facility.state.operations.filter((entry) => entry.category !== 'command').at(-1)?.resolution).toBe('autonomous')
+    expect(facility.state.operations.at(-1)?.summary).toContain('Response window expired')
   })
 
   it('keeps saved readiness dormant until the explicit readiness control resumes it', async () => {
@@ -491,7 +577,7 @@ describe('spoken terminal commands', () => {
     expect(speech.speak.mock.calls.at(-1)![0]).toContain('Press 8 to acknowledge facility support')
   })
 
-  it('retains simultaneous delivery and routine service in the transcript with one combined announcement', async () => {
+  it('retains simultaneous delivery and routine service with their distinct speakers', async () => {
     vi.useFakeTimers()
     const start = 1_800_000_000_000
     vi.setSystemTime(start)
@@ -508,10 +594,12 @@ describe('spoken terminal commands', () => {
     vi.setSystemTime(start + 17 * 60_000); callbacks.get(1000)!()
     const reports = facility.state.operations.filter((event) => event.timestamp === Date.now())
     expect(reports).toHaveLength(2)
-    for (const event of reports) expect(facility.state.transcript).toContainEqual(expect.objectContaining({ text: event.summary, timestamp: event.timestamp }))
-    expect(speech.speak).toHaveBeenCalledTimes(1)
+    for (const event of reports) expect(facility.state.transcript).toContainEqual(expect.objectContaining({ text: expect.stringContaining(event.summary), timestamp: event.timestamp }))
+    expect(speech.speak).toHaveBeenCalledTimes(2)
+    expect(speech.speak.mock.calls[0]![1]).toBe('measured')
+    expect(speech.speak.mock.calls[1]![1]).toBe('terminal')
     expect(speech.speak.mock.calls[0]![0]).toContain('delivered 12 tonnes')
-    expect(speech.speak.mock.calls[0]![0]).toContain('assigned to routine service')
+    expect(speech.speak.mock.calls[1]![0]).toContain('assigned to routine service')
   })
 
   it('reports remote work resumption in both history and the connected transcript without inventing a return', async () => {
@@ -545,7 +633,7 @@ describe('spoken terminal commands', () => {
     expect(facility.onboardingActive.value).toBe(false)
     expect(facility.state.productionCycles).toBe(0)
     expect(facility.state.oreProcessed).toBe(0)
-    expect(facility.state.operations).toEqual([])
+    expect(facility.state.operations.filter((entry) => entry.category !== 'command')).toEqual([])
     expect(speech.speakExchange).not.toHaveBeenCalled()
     for (const text of [operationalStatus(facility.state), returnBriefing(facility.state, start, Date.now())]) {
       expect(text).toContain('Facility not commissioned')
@@ -555,7 +643,7 @@ describe('spoken terminal commands', () => {
     }
     // Normal command keys must not fabricate incidents or authorize commissioning.
     for (const key of ['0', '3', '9', '#'] as const) await facility.pressKey(key)
-    expect(facility.state.operations).toEqual([])
+    expect(facility.state.operations.filter((entry) => entry.category !== 'command')).toEqual([])
     expect(facility.onboardingActive.value).toBe(false)
     expect(facility.state.autopilotEnabled).toBe(false)
     facility.replayOnboarding()
@@ -616,13 +704,13 @@ describe('spoken terminal commands', () => {
     }
     expect(facility.state.pendingEvent).toBeNull()
     expect(facility.state.history).toEqual(saved.history)
-    expect(facility.state.operations).toEqual([])
+    expect(facility.state.operations.filter((entry) => entry.category !== 'command')).toEqual([])
     expect(facility.state.onboardingStep).toBe(4)
     expect(facility.onboardingActive.value).toBe(false)
     facility.replayOnboarding(); facility.skipOnboarding()
     await facility.pressKey('0')
     expect(facility.state.pendingEvent).toBeNull()
-    expect(facility.state.operations).toEqual([])
+    expect(facility.state.operations.filter((entry) => entry.category !== 'command')).toEqual([])
     expect(facility.state.history).toEqual(saved.history)
   })
 

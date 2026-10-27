@@ -9,6 +9,7 @@ The player is the captain of a staffed mining facility on Minerva. Sound is the 
 - [Crew Brief v0.1](https://docs.google.com/document/d/17gsrWFUz87kP_HKOsciiEYQc0mBk24D_Pd-vLmqCP6U)
 - [Milestone 2 Crew Brief — The Living Mine](https://docs.google.com/document/d/1z4XdfSmxUQitOvMrb87Cztb1MBMKvapDhYRaKurQIhI/edit)
 - [Milestone 3 Crew Brief — Vessel Damage & Repair Operations](https://docs.google.com/document/d/1FeslP44gUyMT6Rk0nI0QaKhoXf1aUw3YDUmOhBSINgU/edit)
+- [Milestone 4 Crew Brief — Crew Personalities](https://docs.google.com/document/d/1GuA5r9ZlOYE3u1d-_nP3rNq6OkrwxjbjMzmyvugdYDg/edit)
 - Product owner and final decision-maker: Dan
 
 The Google Drive brief is the canonical source for product scope, acceptance criteria, and deferred work.
@@ -48,6 +49,10 @@ Capacitor + Vue 3 is the approved mobile stack. The first prototype slice includ
 - optional transcript/history
 
 Prototype miner names and dialogue are placeholders pending content-owner approval. The official logo asset is also still required.
+
+## Milestone 4 implementation
+
+Persistent crew profiles, individual operational wording, safe mood/expertise explanations, and rare approved cross-app chatter are implemented on `codex/milestone-4-crew-personalities`. Saves migrate to schema 5; portable schemas 3/4 remain supported. Dan approved TS-06 as the Text Solitaire excerpt for this milestone. Device playtesting is in progress; acceptance remains pending. Milestone 4 is **not complete**. See [implementation, verification, roster and rollback notes](docs/milestone-4.md).
 
 ## Correctness pass (17 September 2026)
 

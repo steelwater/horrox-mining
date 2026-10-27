@@ -1,3 +1,4 @@
+import { restoreCrew } from './crewPersistence'
 import { readRepairRecord, restoreRepairs } from './repairPersistence'
 import { operationAgeAt } from './calendar'
 import { Preferences } from '@capacitor/preferences'
@@ -16,10 +17,10 @@ function choice<T extends string>(value: unknown, options: readonly T[], fallbac
 
 export function migrateFacility(raw: unknown, now: number): FacilityState {
   const saved = object(raw)
-  if (typeof saved.version === 'number' && saved.version > 4) throw new Error('This save needs a newer version of Horrox. It has not been replaced.')
+  if (typeof saved.version === 'number' && saved.version > 5) throw new Error('This save needs a newer version of Horrox. It has not been replaced.')
   const marker = Math.min(now, count(saved.lastProcessedAt, count(saved.lastSavedAt, now)))
   const state = createInitialState(marker)
-  if ((saved.version !== 3 && saved.version !== 4) || saved.commissioned === true || saved.onboardingStatus === 'complete' || saved.onboardingStatus === 'skipped') {
+  if ((saved.version !== 3 && saved.version !== 4 && saved.version !== 5) || saved.commissioned === true || saved.onboardingStatus === 'complete' || saved.onboardingStatus === 'skipped') {
     commissionFacility(state, marker)
   }
   const timestamp = (value: unknown, fallback: number) => Math.min(count(value, fallback), now)
@@ -34,7 +35,7 @@ export function migrateFacility(raw: unknown, now: number): FacilityState {
   for (const field of ['facilityAgeMs', 'productionCycles', 'oreProcessed', 'equipmentWear'] as const) state[field] = count(saved[field], state[field])
   state.autopilotEnabled = saved.autopilotEnabled === true
   state.onboardingStatus = choice(saved.onboardingStatus, ['pending', 'active', 'complete', 'skipped'], 'pending')
-  state.onboardingStep = (saved.version === 3 || saved.version === 4) ? Math.min(onboardingSteps.length - 1, Math.floor(count(saved.onboardingStep, 0))) : 0
+  state.onboardingStep = (saved.version === 3 || saved.version === 4 || saved.version === 5) ? Math.min(onboardingSteps.length - 1, Math.floor(count(saved.onboardingStep, 0))) : 0
   state.history = strings(saved.history).slice(-100)
   state.eventCooldowns = Object.fromEntries(Object.entries(object(saved.eventCooldowns)).filter(([id, at]) => findEvent(id) && typeof at === 'number' && Number.isFinite(at) && at <= now + MAX_CATCHUP_MS)) as Record<string, number>
   const pending = object(saved.pendingEvent)
@@ -99,7 +100,7 @@ export function migrateFacility(raw: unknown, now: number): FacilityState {
   if (Array.isArray(saved.operations)) state.operations = saved.operations.flatMap((entry) => {
     const e = object(entry)
     const repair = readRepairRecord(e.repair)
-    return typeof e.id === 'string' && typeof e.summary === 'string' && typeof e.source === 'string' ? [{ id: e.id, ...(typeof e.operationCode === 'number' ? { operationCode: e.operationCode } : {}), ...(repair ? { repair } : {}), summary: e.summary, source: e.source, timestamp: timestamp(e.timestamp, marker), operationAgeMs: count(e.operationAgeMs, operationAgeAt(state, timestamp(e.timestamp, marker))), category: choice(e.category, ['mining', 'docking', 'maintenance', 'problem', 'safety', 'chatter', 'processing'], 'problem'), relatedIds: strings(e.relatedIds), actionRequested: e.actionRequested === true, resolution: choice(e.resolution, ['pending', 'manual', 'autonomous'], 'autonomous'), reason: typeof e.reason === 'string' ? e.reason : null }] : []
+    return typeof e.id === 'string' && typeof e.summary === 'string' && typeof e.source === 'string' ? [{ id: e.id, ...(typeof e.operationCode === 'number' ? { operationCode: e.operationCode } : {}), ...(repair ? { repair } : {}), summary: e.summary, source: e.source, timestamp: timestamp(e.timestamp, marker), operationAgeMs: count(e.operationAgeMs, operationAgeAt(state, timestamp(e.timestamp, marker))), category: choice(e.category, ['mining', 'docking', 'maintenance', 'problem', 'safety', 'chatter', 'processing', 'command'], 'problem'), relatedIds: strings(e.relatedIds), actionRequested: e.actionRequested === true, resolution: choice(e.resolution, ['pending', 'manual', 'autonomous'], 'autonomous'), reason: typeof e.reason === 'string' ? e.reason : null }] : []
   }).slice(-1000).sort((a, b) => a.timestamp - b.timestamp)
   state.nextOperationId = Math.max(1, Math.floor(count(saved.nextOperationId, 1)), ...state.operations.map((e) => count(Number(e.id.replace('op-', '')), 0) + 1))
   if (Array.isArray(saved.transcript)) state.transcript = saved.transcript.flatMap((entry) => {
@@ -107,6 +108,7 @@ export function migrateFacility(raw: unknown, now: number): FacilityState {
     return typeof e.id === 'string' && typeof e.text === 'string' && typeof e.speaker === 'string' ? [{ id: e.id, text: e.text, speaker: e.speaker, timestamp: timestamp(e.timestamp, marker), operationAgeMs: count(e.operationAgeMs, operationAgeAt(state, timestamp(e.timestamp, marker))), priority: Math.max(1, Math.min(6, Math.floor(count(e.priority, 3)))) as 1 | 2 | 3 | 4 | 5 | 6 }] : []
   }).slice(-80)
   restoreRepairs(state, saved)
+  restoreCrew(state, saved)
   return state
 }
 

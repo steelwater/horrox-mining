@@ -31,7 +31,7 @@ describe('critical announcements and emergency resolution', () => {
     expect(response.source).toBe('facility')
     expect(state.repairJobs[0]?.createdAt).toBe(start)
     expect(repairOptions(state, vessel, fault)['1']?.action).toBe('diagnostics')
-    expect(decideRepair(state, vessel, fault, 'diagnostics', start + 1)).toContain('Required:')
+    expect(decideRepair(state, vessel, fault, 'diagnostics', start + 1)).toContain('Service requirement:')
     recordAbsenceTranscript(state, Number(announcement.id.slice(3)))
     expect(state.transcript.some((entry) => entry.text.includes('initiating the predefined safe response immediately'))).toBe(true)
     expect(state.transcript.some((entry) => entry.text.includes('Press 3 for vessel support'))).toBe(false)
