@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { exhibits, recentEvents } from './game/information'
 import { formatOperationTime, operationDate } from './game/calendar'
 import { useFacility } from './composables/useFacility'
 import { useTerminalTools } from './composables/useTerminalTools'
@@ -10,6 +11,7 @@ import type { KeypadKey } from './game/types'
 
 const booting = ref(true)
 const {
+  beginKey, endKey, protectedKey, updateProtection, holdProgress, inputNotice, conversationStatus, playInformation, stopInformation,
   importing,
   portableSnapshot,
   importSnapshot,
@@ -22,7 +24,6 @@ const {
   pendingEvent,
   onboardingActive,
   facilityAgeHours,
-  pressKey,
   skipOnboarding,
   replayOnboarding,
   cycleDisplayMode,
@@ -32,6 +33,29 @@ const {
 const keys: KeypadKey[] = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '*', '0', '#']
 const latestTranscript = computed(() => [...state.transcript].reverse())
 const menuOpen = ref(false)
+const showAllEvents = ref(false)
+const information = ref<'about' | 'recent' | 'settings' | null>(null)
+const selectedInformation = ref<{ title: string; text: string } | null>(null)
+watch(importing, value => { if (value) { stopInformation(); information.value = null; selectedInformation.value = null } })
+const recordedEvents = computed(() => recentEvents(state))
+function showInformation(view: 'about' | 'recent' | 'settings'): void {
+  stopInformation()
+  showAllEvents.value = false
+  information.value = view
+  menuOpen.value = false
+  selectedInformation.value = view === 'about' ? exhibits[0]! : null
+  if (view === 'about') playInformation(exhibits[0]!.text)
+}
+function chooseInformation(item: { title: string; text: string }): void {
+  stopInformation()
+  selectedInformation.value = item
+}
+function keypadPointer(event: PointerEvent, key: KeypadKey): void {
+  if (event.button !== 0) return
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+  beginKey(key)
+}
+
 const textDisplayVisible = ref(true)
 
 const {
@@ -106,6 +130,9 @@ window.setTimeout(() => {
             </button>
             <button type="button" :disabled="copying || importing" @click="copyText(formatTranscript(state.transcript), 'transcript'); menuOpen = false">{{ copying ? 'COPYING…' : 'COPY TRANSCRIPT' }}</button>
             <button type="button" :disabled="copying || importing" @click="copyText(formatOperationalHistory(state.operations), 'history'); menuOpen = false">COPY OPERATIONAL HISTORY</button>
+            <button type="button" @click="showInformation('about')">ABOUT</button>
+            <button type="button" @click="showInformation('recent')">RECENT EVENTS</button>
+            <button type="button" @click="showInformation('settings')">SETTINGS</button>
             <button type="button" :disabled="copying || importing" @click="openUtility('export'); menuOpen = false">EXPORT SAVE</button>
             <button type="button" :disabled="copying || importing" @click="openUtility('import'); menuOpen = false">IMPORT SAVE</button>
           </div>
@@ -139,6 +166,41 @@ window.setTimeout(() => {
         </div>
       </section>
 
+      <section v-if="information" class="information-panel" :aria-label="information === 'about' ? 'About facility audio guide' : information === 'recent' ? 'Recent Events' : 'Settings'">
+        <h2>{{ information === 'about' ? 'ABOUT' : information === 'recent' ? 'RECENT EVENTS' : 'SETTINGS' }}</h2>
+        <template v-if="information === 'settings'">
+          <label for="keypad-protection">Keypad Protection</label>
+          <select id="keypad-protection" v-model="state.keypadProtection.mode" @change="updateProtection">
+            <option value="off">Off</option><option value="critical">Critical Actions Only (recommended)</option><option value="all">All Actions</option>
+          </select>
+          <label for="hold-seconds">Hold duration (seconds)</label>
+          <select id="hold-seconds" v-model.number="state.keypadProtection.holdSeconds" @change="updateProtection">
+            <option v-for="seconds in 5" :key="seconds" :value="seconds">{{ seconds }}</option>
+          </select>
+          <p>Touch: hold the key until confirmed. Keyboard, Bluetooth numpad and assistive activation: press and release, wait the selected duration, then press the same key again. Repeated keydown signals do not confirm. The confirmation expires 15 seconds after the wait. Repeat (0) is always immediate.</p>
+          <p>Critical protection covers repair actions, active request choices, safety isolation and autopilot changes. Diagnostics, recommendations and navigation remain immediate.</p>
+        </template>
+        <template v-else>
+          <p>Facility Control · Optional audio. Live operations continue and can interrupt the guide. Use Replay after an interruption.</p>
+          <div class="information-list" v-if="information === 'about'">
+            <button v-for="exhibit in exhibits" :key="exhibit.id" @click="chooseInformation(exhibit)">{{ exhibit.title }}</button>
+          </div>
+          <div class="information-list" v-else>
+            <p v-if="!recordedEvents.length">No notable events have been recorded for this operation.</p>
+            <button v-for="event in (showAllEvents ? recordedEvents : recordedEvents.slice(0, 10))" :key="event.id" @click="chooseInformation(event)">{{ event.date }} — {{ event.title }}</button>
+            <button v-if="recordedEvents.length > 10 && !showAllEvents" @click="showAllEvents = true">SHOW OLDER EVENTS</button>
+          </div>
+          <article v-if="selectedInformation">
+            <h3>{{ selectedInformation.title }}</h3><p>{{ selectedInformation.text }}</p>
+            <div class="terminal-actions">
+              <button @click="playInformation(selectedInformation.text)">PLAY / REPLAY</button>
+              <button @click="stopInformation">STOP</button>
+            </div>
+          </article>
+        </template>
+        <button @click="stopInformation(); information = null; selectedInformation = null">BACK TO TERMINAL</button>
+      </section>
+
       <p v-if="storageError" role="alert"><strong>WARNING: </strong>{{ storageError }}</p>
 
       <section v-if="textDisplayVisible" class="readout" aria-live="polite">
@@ -159,6 +221,10 @@ window.setTimeout(() => {
         </div>
       </section>
 
+      <p v-if="conversationStatus" class="utility-message" role="status">{{ conversationStatus }}</p>
+      <p v-if="inputNotice" class="utility-message" role="status">{{ inputNotice }}</p>
+      <progress v-if="holdProgress" :value="holdProgress" max="100" aria-label="Keypad protection progress">{{ holdProgress }}%</progress>
+      <p v-if="holdProgress">PROTECTION: {{ holdProgress }}%</p>
       <section class="keypad" aria-label="Terminal keypad">
         <button
           v-for="key in keys"
@@ -166,7 +232,12 @@ window.setTimeout(() => {
           :disabled="importing"
           class="key"
           :aria-label="key === '*' ? 'Back or cancel' : key === '#' ? 'Confirm or enter' : `Key ${key}`"
-          @click="pressKey(key)"
+          :aria-description="protectedKey(key) ? 'Protected action. Hold on touch, or press and release, wait, then press again on keyboard.' : undefined"
+          @pointerdown="keypadPointer($event, key)"
+          @pointerup="endKey(key)"
+          @pointercancel="endKey(key)"
+          @lostpointercapture="endKey(key)"
+          @click="if ($event.detail === 0) { beginKey(key, true); endKey(key, true) }"
         >
           <span>{{ key }}</span>
           <small v-if="key === '0'">REPEAT / STATUS</small>

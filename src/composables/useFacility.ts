@@ -1,3 +1,4 @@
+import { conversationIdentity, pendingCause, preparePrompt, finishPrompt, pauseConversations, pruneConversations, responseDeadline } from '../game/conversations'
 import { crewReport } from '../game/crew'
 import { eligibleChatter, rememberChatter, rememberChatterContext } from '../game/chatter'
 import { exportSave, parseSave } from '../game/portableSave'
@@ -39,6 +40,87 @@ export function useFacility() {
   const lastMessage = ref('')
   const supportFaultId = ref<string | null>(null)
   const timers: number[] = []
+  const inputNotice = ref('')
+  const holdProgress = ref(0)
+  const inputRevision = ref(0)
+  let held: { key: KeypadKey; context: string; cause: string | null; startedAt: number; keyboard: boolean; released: boolean } | null = null
+  let holdTimer: ReturnType<typeof setInterval> | null = null
+  const conversationStatus = computed(() => {
+    inputRevision.value
+    const clocks = Object.values(state.conversations)
+    if (clocks.some(clock => clock.phase === 'paused')) return 'Response paused. Press 0 to hear the request and start a fresh 15 seconds.'
+    if (clocks.some(clock => clock.phase === 'prompt')) return 'Listening to request. Response clock starts after all choices.'
+    const deadline = Math.min(...clocks.map(clock => clock.deadline ?? Infinity))
+    return Number.isFinite(deadline) ? `${Math.max(0, Math.ceil((deadline - Date.now()) / 1000))} seconds to respond.` : ''
+  })
+
+  function inputContext(): string { return `${state.onboardingStatus}:${supportFaultId.value ?? pendingCause(state) ?? 'main'}` }
+  function selectedCause(): string | null { return supportFaultId.value ?? pendingCause(state) }
+  function protectedKey(key: KeypadKey): boolean {
+    if (key === '0' || state.keypadProtection.mode === 'off') return false
+    if (state.keypadProtection.mode === 'all') return true
+    if (!state.commissioned || state.onboardingStatus === 'active') return false
+    const selected = state.vessels.flatMap(v => activeFaults(v).map(f => ({ v, f }))).find(({ f }) => f.id === supportFaultId.value)
+    if (selected) {
+      const action = repairOptions(state, selected.v, selected.f)[key]?.action
+      return !!action && action !== 'diagnostics' && action !== 'recommend'
+    }
+    return state.pendingEvent ? !!findEvent(state.pendingEvent.eventId)?.responseOptions[key] : key === '1' || key === '9'
+  }
+  function cancelInput(): void {
+    if (held?.cause && state.conversations[held.cause]?.phase === 'holding') {
+      state.conversations[held.cause] = { phase: 'paused', deadline: null }
+    }
+    held = null
+    if (holdTimer) clearInterval(holdTimer)
+    holdTimer = null
+    holdProgress.value = 0
+  }
+  function beginKey(key: KeypadKey, keyboard = false): void {
+    if (!ready.value || importing.value) return
+    if (!protectedKey(key)) { cancelInput(); void pressKey(key); return }
+    const now = Date.now()
+    if (keyboard && held?.keyboard && held.released && held.key === key && held.context === inputContext()) {
+      if (now - held.startedAt >= state.keypadProtection.holdSeconds * 1000) { commitInput(); return }
+      held.released = false
+      inputNotice.value = 'Wait for the protection interval, then press the same key again.'
+      return
+    }
+    if (keyboard && held?.keyboard && !held.released && held.key === key) return
+    cancelInput()
+    const cause = selectedCause()
+    if (cause && now >= responseDeadline(state, cause, Infinity)) { tick(); inputNotice.value = 'Response expired. Press 0 for status.'; return }
+    held = { key, context: inputContext(), cause, startedAt: now, keyboard, released: false }
+    if (cause && state.conversations[cause]) state.conversations[cause] = { phase: 'holding', deadline: null }
+    inputNotice.value = keyboard ? `Release, wait ${state.keypadProtection.holdSeconds} seconds, then press ${key} again to confirm. Key repeat cannot confirm.` : `Hold ${key} for ${state.keypadProtection.holdSeconds} seconds. Release to cancel.`
+    holdTimer = setInterval(() => {
+      if (!held) return
+      if (held.context !== inputContext()) { cancelInput(); return }
+      holdProgress.value = Math.min(100, Math.floor((Date.now() - held.startedAt) / (state.keypadProtection.holdSeconds * 10)))
+      if (holdProgress.value === 100 && !held.keyboard) commitInput()
+      else if (held.keyboard && Date.now() - held.startedAt > (state.keypadProtection.holdSeconds + 15) * 1000) { cancelInput(); inputNotice.value = 'Confirmation cancelled. Press 0 to repeat.' }
+    }, 100)
+  }
+  function commitInput(): void {
+    const input = held
+    if (!input || input.context !== inputContext()) { cancelInput(); return }
+    // Keep the reservation through the synchronous decision; timer and action cannot both win.
+    held = null
+    if (holdTimer) clearInterval(holdTimer)
+    holdTimer = null
+    holdProgress.value = 0
+    inputNotice.value = ''
+    void pressKey(input.key).finally(() => {
+      if (input.cause && state.conversations[input.cause]?.phase === 'holding') state.conversations[input.cause] = { phase: 'paused', deadline: null }
+    })
+  }
+  function endKey(key?: KeypadKey, keyboard = false): void {
+    if (!held || (key && held.key !== key)) return
+    if (keyboard && held.keyboard) held.released = true
+    else if (!held.keyboard) { cancelInput(); inputNotice.value = 'Hold cancelled. Press 0 to repeat if needed.' }
+  }
+  function updateProtection(): void { cancelInput(); void persist() }
+
 
   const pendingEvent = computed(() => state.pendingEvent ? findEvent(state.pendingEvent.eventId) : pendingFaults(state).length ? { type: 'vessel support' } : null)
   const onboardingActive = computed(() => state.onboardingStatus === 'active')
@@ -65,7 +147,15 @@ export function useFacility() {
   function announce(text: string, speaker = 'Facility Control', profileId = 'terminal', priority: AudioPriority = 3, context?: SpeechContext, event?: OperationalEvent): void {
     if (event && speaker !== 'Facility Control') text = crewReport(state, { ...event, summary: text })
     recordTranscript(text, speaker, priority, event)
-    audio.speak(text, profileId, priority, context)
+    if (priority === 1) { cancelInput(); pauseConversations(state) }
+    if (context?.kind === 'request') {
+      preparePrompt(state, context.cause)
+      audio.speak(text, profileId, priority, context, {
+        onStart: () => { if (state.conversations[context.cause]?.phase === 'paused') preparePrompt(state, context.cause) },
+        onFinish: failed => { finishPrompt(state, context.cause, Date.now(), failed); void persist() },
+        onInterrupt: () => { if (state.conversations[context.cause]?.phase === 'prompt') state.conversations[context.cause] = { phase: 'paused', deadline: null } },
+      })
+    } else audio.speak(text, profileId, priority, context)
   }
 
   function recordAbsence(previousOperationId: number): void {
@@ -116,8 +206,11 @@ export function useFacility() {
       : !state.commissioned ? 'uncommissioned terminal'
         : supportFaultId.value ? `vessel support ${supportFaultId.value}`
           : state.pendingEvent ? `request ${state.pendingEvent.eventId}` : 'main terminal'
+    const identity = selectedCause() ? conversationIdentity(state, selectedCause()!) : null
     const audit = { outcome: 'accepted', detail: '', relatedIds: fault ? [fault.vessel.id, fault.fault.id] : state.pendingEvent ? [state.pendingEvent.eventId] : [] as string[] }
+    if (identity) audit.relatedIds.push(identity.promptLineId)
     handleKey(key, audit)
+    pruneConversations(state)
     recordOperation(state, { timestamp, source: 'captain', category: 'command',
       summary: `Key ${key}. Context: ${context}. Outcome: ${audit.outcome}. ${audit.detail || lastMessage.value}`,
       relatedIds: audit.relatedIds, actionRequested: false, resolution: 'manual', reason: 'Captain keypad command attempt.' })
@@ -167,6 +260,9 @@ export function useFacility() {
     }
 
     const faults = state.vessels.flatMap((vessel) => activeFaults(vessel).map((fault) => ({ vessel, fault })))
+    if (key === '0' && !supportFaultId.value && !state.pendingEvent) {
+      supportFaultId.value = faults.find(({ fault }) => state.conversations[fault.id])?.fault.id ?? null
+    }
     let selected = faults.find(({ fault }) => fault.id === supportFaultId.value)
     if (supportFaultId.value && !selected) {
       supportFaultId.value = null
@@ -189,11 +285,15 @@ export function useFacility() {
           audit.outcome = 'rejected'
           announce('No additional vessel faults. Press 0 for current repair choices. Star returns to the main terminal.')
         }
-      } else if (key === '0') announce(repairMenu(state, selected.vessel, selected.fault), 'Facility Control', 'terminal', 2, { kind: 'request', cause: selected.fault.id })
+      } else if (key === '0') { audio.cancelPrompt(selected.fault.id); announce(repairMenu(state, selected.vessel, selected.fault), 'Facility Control', 'terminal', 2, { kind: 'request', cause: selected.fault.id }) }
       else {
         const option = repairOptions(state, selected.vessel, selected.fault)[key]
         if (!option) audit.outcome = 'rejected'
-        announce(option ? decideRepair(state, selected.vessel, selected.fault, option.action, Date.now()) : 'That response is unavailable. Press 0 for current repair choices.', 'Facility Control', 'terminal', 2, { kind: 'response', cause: selected.fault.id })
+        if (option) { audio.cancelPrompt(selected.fault.id); audit.relatedIds.push(`${selected.fault.id}:choice:${option.action}`) }
+        const answer = option ? decideRepair(state, selected.vessel, selected.fault, option.action, Date.now()) : 'That response is unavailable. Press 0 for current repair choices.'
+        const stillChoosing = option && ['diagnostics', 'recommend'].includes(option.action) && selected.fault.decisionAt !== null
+        announce(stillChoosing ? `${answer} ${repairMenu(state, selected.vessel, selected.fault)}` : answer, 'Facility Control', 'terminal', 2,
+          { kind: stillChoosing ? 'request' : 'response', cause: selected.fault.id })
       }
       return
     }
@@ -213,11 +313,13 @@ export function useFacility() {
 
     if (state.pendingEvent) {
       if (key === '0') {
+        audio.cancelPrompt(pendingCause(state)!)
         const event = findEvent(state.pendingEvent.eventId)!
-        announce(`${crewReport(state, { source: event.participants[0] ?? 'facility', summary: event.spokenLines.join(' '), category: event.type })}${faults.length ? ` ${faults.map(({ vessel, fault }) => vesselRepairStatus(state, vessel, fault)).join(' ')}` : ''}`, speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority, { kind: 'request', cause: `${event.id}:${state.pendingEvent.requestedAt}` })
+        announce(`${crewReport(state, { source: event.participants[0] ?? 'facility', summary: event.spokenLines.join(' '), category: event.type, operationCode: event.operationCode })}${faults.length ? ` ${faults.map(({ vessel, fault }) => vesselRepairStatus(state, vessel, fault)).join(' ')}` : ''}`, speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority, { kind: 'request', cause: `${event.id}:${state.pendingEvent.requestedAt}` })
         return
       }
       const cause = `${state.pendingEvent.eventId}:${state.pendingEvent.requestedAt}`
+      if (findEvent(state.pendingEvent.eventId)?.responseOptions[key]) audio.cancelPrompt(cause)
       const message = applyPendingDecision(state, key, Date.now())
       if (message) {
         announce(message, 'Facility Control', 'terminal', 2, { kind: 'response', cause })
@@ -253,7 +355,7 @@ export function useFacility() {
       announce('That channel has no new report at this time.', 'Facility Control')
       return false
     }
-    announce(crewReport(state, { source: event.participants[0] ?? 'facility', summary: event.spokenLines.join(' '), category: event.type }), speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority, event.immediateSafety ? undefined : { kind: 'request', cause: `${event.id}:${state.pendingEvent!.requestedAt}` })
+    announce(crewReport(state, { source: event.participants[0] ?? 'facility', summary: event.spokenLines.join(' '), category: event.type, operationCode: event.operationCode }), speakerFor(event.participants[0]), profileFor(event.participants[0]), event.priority, event.immediateSafety ? undefined : { kind: 'request', cause: `${event.id}:${state.pendingEvent!.requestedAt}` })
     if (event.immediateSafety) announce(state.operations.at(-1)!.summary, 'Facility Control', 'terminal', 1)
     return true
   }
@@ -269,6 +371,7 @@ export function useFacility() {
     if (!ready.value || importing.value || suspendedAt !== null) return
     const before = state.nextOperationId
     const now = Date.now()
+    inputRevision.value++
     advanceFacility(state, now)
     state.lastActiveAt = Math.max(state.lastActiveAt, now)
     if (state.nextOperationId !== before) {
@@ -298,9 +401,9 @@ export function useFacility() {
           const requester = state.miners.find((miner) => miner.id === entry.source)
           const vessel = entry.repair ? state.vessels.find((v) => v.id === entry.repair!.vesselId) : undefined
           const fault = vessel?.activeFaults.find((f) => f.id === entry.repair!.faultId)
-          if (vessel && fault && fault.decisionAt !== null && entry.repair && requester && entry.repair.detectedAt === entry.timestamp && entry.resolution === 'pending' && entry.repair.action === null) {
-            announceRequest({ text: entry.summary, speaker: requester.callsign, profile: requester.voiceProfileId },
-              `Service request received from ${requester.callsign}. Captain, press 3 for vessel support. In that channel: ${repairMenu(state, vessel, fault)}`,
+          if (vessel && fault && fault.decisionAt !== null && entry.repair && entry.repair.detectedAt === entry.timestamp && entry.resolution === 'pending' && entry.repair.action === null) {
+            announceRequest({ text: entry.summary, speaker: speakerFor(entry.source), profile: profileFor(entry.source) },
+              `${requester ? `Service request received from ${requester.callsign}.` : 'Telemetry service request received.'} Captain, press 3 for vessel support. In that channel: ${repairMenu(state, vessel, fault)}`,
               fault.id, priority, entry)
           } else {
             const timedOut = entry.resolution === 'autonomous' && entry.reason?.includes('response window elapsed')
@@ -321,7 +424,9 @@ export function useFacility() {
     if (document.hidden) {
       tick()
       pauseReadiness()
-      audio.cancelChatter()
+      cancelInput()
+      pauseConversations(state)
+      audio.stop()
       suspendedAt = Date.now()
       state.lastActiveAt = suspendedAt
       void persist()
@@ -422,6 +527,7 @@ export function useFacility() {
     importing.value = true
     try {
       const restored = await replaceFacility(imported, Date.now())
+      cancelInput()
       audio.stop()
       Object.assign(state, restored)
       supportFaultId.value = null
@@ -439,8 +545,14 @@ export function useFacility() {
     const key = normalizeKeyboardKey(event.key)
     if (!key) return
     event.preventDefault()
-    void pressKey(key)
+    if (!event.repeat) beginKey(key, true)
   }
+
+  function onKeyup(event: KeyboardEvent): void {
+    const key = normalizeKeyboardKey(event.key)
+    if (key) endKey(key, true)
+  }
+  function onBlur(): void { cancelInput(); pauseConversations(state) }
 
   function speakerFor(minerId?: string): string {
     return state.miners.find((miner) => miner.id === minerId)?.callsign ?? 'Facility Control'
@@ -452,11 +564,16 @@ export function useFacility() {
 
   onMounted(() => {
     window.addEventListener('keydown', onKeydown)
+    window.addEventListener('keyup', onKeyup)
+    window.addEventListener('blur', onBlur)
     document.addEventListener('visibilitychange', onVisibilityChange)
   })
 
   onBeforeUnmount(() => {
+    cancelInput()
     window.removeEventListener('keydown', onKeydown)
+    window.removeEventListener('keyup', onKeyup)
+    window.removeEventListener('blur', onBlur)
     document.removeEventListener('visibilitychange', onVisibilityChange)
     timers.forEach((timer) => window.clearInterval(timer))
     audio.stop()
@@ -464,6 +581,9 @@ export function useFacility() {
   })
 
   return {
+    beginKey, endKey, cancelInput, protectedKey, updateProtection, holdProgress, inputNotice, conversationStatus,
+    playInformation: (text: string) => { audio.cancelOptional(); audio.speak(text, 'terminal', 6) },
+    stopInformation: () => audio.cancelOptional(),
     importing,
     portableSnapshot,
     importSnapshot,

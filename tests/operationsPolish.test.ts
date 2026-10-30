@@ -50,7 +50,7 @@ describe('operational chatter', () => {
     const restored = parseSave(exportSave(state), start + minute)
     expect(eligibleChatter(restored, start + 10 * minute).some((e) => e.id === exchange.id)).toBe(false)
     expect(eligibleChatter(restored, start + 61 * minute).some((e) => e.id === exchange.id)).toBe(true)
-    expect(restored.version).toBe(5)
+    expect(restored.version).toBe(6)
   })
 
   it('keeps a two-hour unattended transcript varied with no short repeat loops', () => {

@@ -185,10 +185,10 @@ describe('decisions and operational record', () => {
     beginRequest(state, 'safety-pressure-seal', start)
     expect(state.pendingEvent).toBeNull()
     expect(state.systems.berth).toBe('isolated')
-    beginRequest(state, 'docking-hauler-two', start + 1)
-    applyPendingDecision(state, '1', start + 2)
+    expect(beginRequest(state, 'docking-hauler-two', start + 1)).toBe(false)
+    expect(applyPendingDecision(state, '1', start + 2)).toBeNull()
     expect(state.vessels[1]?.dockingState).toBe('holding')
-    expect(state.operations.at(-1)?.reason).toContain('cannot be issued safely')
+    expect(state.pendingEvent).toBeNull()
   })
 
   it('summarizes meaningful work and current attention without inventing activity', () => {
@@ -209,7 +209,7 @@ describe('decisions and operational record', () => {
 describe('save integrity and established voice', () => {
   it('migrates the original counters, pending request, onboarding and history without retroactive production', () => {
     const state = migrateFacility({ version: 1, createdAt: start, lastSavedAt: start, oreProcessed: 144, history: ['existing history'], onboardingStatus: 'active', onboardingStep: 4, pendingEvent: { eventId: 'docking-hauler-two', requestedAt: start } }, start)
-    expect(state.version).toBe(5)
+    expect(state.version).toBe(6)
     expect(state.oreProcessed).toBe(144)
     expect(state.history).toEqual(['existing history'])
     expect(state.onboardingStep).toBe(0)

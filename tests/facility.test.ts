@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const lifecycle = vi.hoisted(() => ({ mounted: [] as Array<() => void>, unmounted: [] as Array<() => void> }))
-const speech = vi.hoisted(() => ({ speak: vi.fn(), speakExchange: vi.fn(), cancelChatter: vi.fn(), startAmbience: vi.fn().mockResolvedValue(undefined), playKeyTone: vi.fn(), stop: vi.fn() }))
+const speech = vi.hoisted(() => ({ speak: vi.fn(), speakExchange: vi.fn(), cancelChatter: vi.fn(), cancelPrompt: vi.fn(), cancelOptional: vi.fn(), startAmbience: vi.fn().mockResolvedValue(undefined), playKeyTone: vi.fn(), stop: vi.fn() }))
 vi.mock('../src/audio/audioDirector', () => ({ AudioDirector: class { constructor() { return speech } } }))
 vi.mock('../src/game/persistence', async (original) => ({ ...await original<typeof import('../src/game/persistence')>(), loadFacility: vi.fn().mockResolvedValue(null), saveFacility: vi.fn().mockResolvedValue(undefined), replaceFacility: vi.fn() }))
 vi.mock('vue', async (original) => ({ ...await original<typeof import('vue')>(), onMounted: (callback: () => void) => lifecycle.mounted.push(callback), onBeforeUnmount: (callback: () => void) => lifecycle.unmounted.push(callback) }))
@@ -64,7 +64,7 @@ describe('spoken terminal commands', () => {
     expect(facility.state.operations.filter((entry) => entry.operationCode === 201)).toHaveLength(2)
     expect(facility.state.repairJobs).toHaveLength(1)
     expect(speech.speak.mock.calls.filter(([text]) => text.includes('Repair already authorized.'))).toHaveLength(2)
-    expect(attempts.at(-1)).toMatchObject({ source: 'captain', relatedIds: ['excavator-03', fault.id], resolution: 'manual' })
+    expect(attempts.at(-1)).toMatchObject({ source: 'captain', relatedIds: ['excavator-03', fault.id, `${fault.id}:request`], resolution: 'manual' })
     expect(attempts.at(-1)!.summary).toContain('Outcome: rejected')
     expect(attempts.at(-1)!.summary).toContain(`Context: vessel support ${fault.id}`)
     expect(migrateFacility(JSON.parse(exportSave(facility.state)).state, Date.now())).toEqual(JSON.parse(exportSave(facility.state)).state)
@@ -396,7 +396,8 @@ describe('spoken terminal commands', () => {
     commissionFacility(facility.state, Date.now())
     facility.state.onboardingStatus = 'complete'
     await facility.pressKey('3')
-    vi.setSystemTime(Date.now() + 300_000)
+    speech.speak.mock.calls.at(-1)![4].onFinish(false)
+    vi.setSystemTime(Date.now() + 15_000)
     await facility.pressKey('1')
     expect(facility.state.systems.berth).toBe('open')
     expect(facility.state.operations.filter((entry) => entry.category !== 'command').at(-1)?.resolution).toBe('autonomous')
@@ -536,6 +537,9 @@ describe('spoken terminal commands', () => {
     detectFault(facility.state, facility.state.vessels[0]!.id, 'power-instability', Date.now())
     await facility.pressKey('1')
     expect(speech.speak.mock.calls.at(-1)![0]).toContain('Power instability')
+    // Finish the ordinary request's full choices before exercising expiry.
+    const request = speech.speak.mock.calls.find(call => call[3]?.cause?.startsWith('docking-hauler-two:'))!
+    request[4].onFinish(false)
     vi.setSystemTime(Date.now() + 300_000)
     await facility.pressKey('1')
     expect(facility.state.repairJobs).toHaveLength(1)
@@ -596,7 +600,8 @@ describe('spoken terminal commands', () => {
     expect(reports).toHaveLength(2)
     for (const event of reports) expect(facility.state.transcript).toContainEqual(expect.objectContaining({ text: expect.stringContaining(event.summary), timestamp: event.timestamp }))
     expect(speech.speak).toHaveBeenCalledTimes(2)
-    expect(speech.speak.mock.calls[0]![1]).toBe('measured')
+    // Cargo reports the actual transfer using Crate’s established voice.
+    expect(speech.speak.mock.calls[0]![1]).toBe('steady')
     expect(speech.speak.mock.calls[1]![1]).toBe('terminal')
     expect(speech.speak.mock.calls[0]![0]).toContain('delivered 12 tonnes')
     expect(speech.speak.mock.calls[1]![0]).toContain('assigned to routine service')
@@ -712,6 +717,58 @@ describe('spoken terminal commands', () => {
     expect(facility.state.pendingEvent).toBeNull()
     expect(facility.state.operations.filter((entry) => entry.category !== 'command')).toEqual([])
     expect(facility.state.history).toEqual(saved.history)
+  })
+
+  it('protects touch actions through the deadline and applies one outcome', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1_800_000_000_000)
+    const facility = useFacility(); facility.ready.value = true
+    commissionFacility(facility.state, Date.now()); facility.state.onboardingStatus = 'complete'
+    await facility.pressKey('5')
+    speech.speak.mock.calls.at(-1)![4].onFinish(false)
+    vi.advanceTimersByTime(14_000)
+    facility.beginKey('1')
+    vi.advanceTimersByTime(2999)
+    expect(facility.state.systems.coolant).toBe('nominal')
+    await vi.advanceTimersByTimeAsync(1)
+    facility.endKey('1')
+    expect(facility.state.systems.coolant).toBe('inspection')
+    expect(facility.state.operations.filter(e => e.category === 'maintenance' && e.resolution === 'manual')).toHaveLength(1)
+  })
+
+  it('requires a released second keyboard press and never accepts key repeat as a hold', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1_800_000_000_000)
+    const facility = useFacility(); facility.ready.value = true
+    commissionFacility(facility.state, Date.now()); facility.state.onboardingStatus = 'complete'
+    facility.beginKey('9', true)
+    await vi.advanceTimersByTimeAsync(4000)
+    facility.beginKey('9', true)
+    expect(facility.state.autopilotEnabled).toBe(false)
+    facility.endKey('9', true)
+    facility.beginKey('9', true)
+    expect(facility.state.autopilotEnabled).toBe(true)
+    expect(facility.state.operations.filter(e => e.category === 'command')).toHaveLength(1)
+    facility.cancelInput()
+  })
+
+  it('cancels short touch holds and keeps Repeat immediate under All Actions', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1_800_000_000_000)
+    const facility = useFacility(); facility.ready.value = true
+    commissionFacility(facility.state, Date.now()); facility.state.onboardingStatus = 'complete'
+    facility.state.keypadProtection.mode = 'all'
+    facility.beginKey('9'); vi.advanceTimersByTime(2000); facility.endKey('9')
+    vi.advanceTimersByTime(2000)
+    expect(facility.state.autopilotEnabled).toBe(false)
+    facility.beginKey('0')
+    expect(facility.state.operations.filter(e => e.category === 'command')).toHaveLength(1)
+    expect(facility.holdProgress.value).toBe(0)
+  })
+
+  it('keeps optional information outside both logs and uses Facility Control voice unchanged', () => {
+    const facility = useFacility()
+    const before = JSON.stringify(facility.state)
+    facility.playInformation('Facility history.'); facility.stopInformation(); facility.playInformation('Facility history.')
+    expect(JSON.stringify(facility.state)).toBe(before)
+    expect(speech.speak).toHaveBeenLastCalledWith('Facility history.', 'terminal', 6)
   })
 
 })

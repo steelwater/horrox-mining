@@ -7,7 +7,7 @@ const strings = (value: unknown): value is string[] => Array.isArray(value) && v
 const fail = (): never => { throw new Error('Invalid crew identity or chatter memory. Current operation has not been replaced.') }
 
 export function restoreCrew(state: FacilityState, saved: Record<string, unknown>): void {
-  if (saved.version !== 5) return // Deterministic defaults already coexist with legacy mood/history/relationships.
+  if (saved.version !== 5 && saved.version !== 6) return // Deterministic defaults already coexist with legacy mood/history/relationships.
   if (!Array.isArray(saved.miners) || saved.miners.length !== state.miners.length) fail()
   const roster = saved.miners as unknown[]
   const ids = state.miners.map((crew) => crew.id)

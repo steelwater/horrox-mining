@@ -20,6 +20,9 @@ function schema4() {
   advanceFacility(state, start + 3 * minute)
   const envelope = JSON.parse(exportSave(state, start + 3 * minute))
   envelope.schemaVersion = envelope.state.version = 4
+  delete envelope.state.conversations
+  delete envelope.state.keypadProtection
+  delete envelope.state.notableEvents
   delete envelope.state.chatterMemory
   envelope.state.miners = envelope.state.miners.slice(0, 3)
   for (const crew of envelope.state.miners) for (const key of ['department', 'temperament', 'specialty', 'experience', 'radioStyle', 'vesselId', 'lastPhrase']) delete crew[key]
@@ -32,7 +35,7 @@ describe('persistent crew identity', () => {
     old.state.miners[0].currentMood = 'thoughtful'
     old.state.miners[0].relationships['iko-ren'] = 'Cantina card rival'
     const migrated = parseSave(JSON.stringify(old), start + 3 * minute)
-    expect(migrated.version).toBe(5)
+    expect(migrated.version).toBe(6)
     expect(migrated.miners).toHaveLength(9)
     for (const field of ['vessels', 'repairJobs', 'repairDrones', 'processingQueue', 'operations', 'facilityAgeMs', 'nextRepairId'] as const) expect(migrated[field]).toEqual(old.state[field])
     expect(migrated.miners[0]?.currentMood).toBe('thoughtful')
@@ -98,12 +101,13 @@ describe('event-safe personality', () => {
     else expect(first).toBe(second) // No personality delays a critical alert.
   })
 
-  it('alternates characteristic phrases across save/reopen and keeps fault mood restrained', () => {
+  it('keeps factual reports free of repetitive generic closers across save/reopen', () => {
     const state = operation()
     const event = { source: 'tess-oren', summary: 'Sampling report.', category: 'mining' as const }
     const first = crewReport(state, event)
     const restored = parseSave(exportSave(state), start)
-    expect(crewReport(restored, event)).not.toBe(first)
+    expect(first).toBe('Sampling report.')
+    expect(crewReport(restored, event)).toBe(first)
     detectFault(restored, 'excavator-03', 'sensor-degradation', start)
     updateCrewState(restored)
     expect(restored.miners.find((crew) => crew.id === 'tess-oren')!.currentMood).toBe('focused')

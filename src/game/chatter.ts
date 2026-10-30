@@ -8,6 +8,16 @@ const MINUTE = 60_000
 // not personality or mood. No early-arrival claim exists without an early-arrival model.
 export const chatter: ChatterExchange[] = [
   ...crossAppChatter,
+  { id: 'M5-RL-sampling-callback', context: 'mining', requires: 'RL-01', cooldownMs: 6 * 60 * MINUTE, lines: [
+    { speaker: 'Rill', profile: 'bright', text: 'Keeping the sampling sequence clear. After that labyrinth conversation, I am taking navigation records seriously.' },
+    { speaker: 'Deepwell', profile: 'measured', text: 'Good. This route should lead back to the berth.' },
+  ] },
+  { id: 'M5-dock-handbook', context: 'dock', cooldownMs: 3 * 60 * MINUTE, lines: [
+    { speaker: 'Latch', profile: 'steady', text: 'Handbook reminder: a secured vessel is not permission to skip the next clearance. Wait for the assigned movement.' },
+  ] },
+  { id: 'M5-refinery-queue', context: 'processing', cooldownMs: 3 * 60 * MINUTE, lines: [
+    { speaker: 'Sieve', profile: 'measured', text: 'Processor One has a queued load. I will report completion when the cycle finishes.' },
+  ] },
   { id: 'sampling-patience', context: 'mining', cooldownMs: 30 * MINUTE, lines: [
     { speaker: 'Rill', profile: 'bright', text: 'Deepwell, does checking the same reading twice count as patience?' },
     { speaker: 'Deepwell', profile: 'measured', text: 'Only if you leave time between the checks.' },
@@ -115,6 +125,7 @@ export function eligibleChatter(state: FacilityState, now: number): ChatterExcha
     const last = state.chatterMemory[exchange.id] ?? heard.filter((e) => e.relatedIds.includes(exchange.id)).at(-1)?.operationAgeMs
       ?? state.transcript.filter((e) => e.priority === 5 && exchange.lines.some((line) => line.text === e.text)).at(-1)?.operationAgeMs
       ?? -Infinity
+    if (exchange.requires && state.chatterMemory[`heard:${exchange.requires}`] === undefined) return false
     if (exchange.pack) {
       const memory = state.chatterMemory
       if (age < 15 * MINUTE || age - Math.max(memory['pack:TS'] ?? -Infinity, memory['pack:RL'] ?? -Infinity) < 45 * MINUTE) return false
