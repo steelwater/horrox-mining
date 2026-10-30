@@ -21,7 +21,7 @@ describe('portable save contract', () => {
     expect(build).toEqual({ version: metadata.version, milestone: metadata.milestone })
     const state = createInitialState(start)
     const envelope = JSON.parse(exportSave(state, start))
-    expect(envelope).toEqual({ format: SAVE_FORMAT, schemaVersion: 5, appVersion: metadata.version, milestone: metadata.milestone, exportedAt: new Date(start).toISOString(), state })
+    expect(envelope).toEqual({ format: SAVE_FORMAT, schemaVersion: 6, appVersion: metadata.version, milestone: metadata.milestone, exportedAt: new Date(start).toISOString(), state })
     expect(parseSave(exportSave(state, start), start)).toEqual(state)
     expect(formatTranscript([])).toContain(buildLabel)
   })

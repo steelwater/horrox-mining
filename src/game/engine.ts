@@ -1,3 +1,4 @@
+import { pendingCause, responseDeadline, pauseConversations, pruneConversations } from './conversations'
 import { autonomyExplanation, miningReporter, updateCrewState } from './crew'
 import { quantity } from './text'
 import { activeFaults, advanceRepairs, detectFault, detectOperationalWear, droneStatus, miningEfficiency, pendingFaults, repairDeadlines, faultLibrary, scheduleRepairs, vesselRepairStatus } from './repairs'
@@ -50,6 +51,7 @@ export function resolvePendingEvent(
   pending: PendingEvent,
   key: KeypadKey | null,
   now: number,
+  responseBy?: number,
 ): { resolved: boolean; message: string; autonomous: boolean } {
   const event = findEvent(pending.eventId)
   if (!event) return { resolved: true, message: 'The pending event is no longer available.', autonomous: true }
@@ -58,11 +60,12 @@ export function resolvePendingEvent(
     return { resolved: true, message: event.autonomousFallback, autonomous: true }
   }
 
-  if (key && event.responseOptions[key] && now - pending.requestedAt < event.responseTimeoutMs) {
+  const deadline = responseBy ?? pending.requestedAt + event.responseTimeoutMs
+  if (key && event.responseOptions[key] && now < deadline) {
     return { resolved: true, message: event.responseOptions[key]!, autonomous: false }
   }
 
-  if (now - pending.requestedAt >= event.responseTimeoutMs) {
+  if (now >= deadline) {
     return { resolved: true, message: event.autonomousFallback, autonomous: true }
   }
 
@@ -71,7 +74,10 @@ export function resolvePendingEvent(
 
 export function createInitialState(now: number): FacilityState {
   return {
-    version: 5,
+    version: 6,
+    conversations: {},
+    keypadProtection: { mode: 'critical', holdSeconds: 3 },
+    notableEvents: [],
     chatterMemory: {},
     operationStart: OPERATION_START,
     commissioned: false,
@@ -110,6 +116,7 @@ export function restoreState(saved: FacilityState, now: number): { state: Facili
   // Older terminals could open requests before commissioning, when their
   // response clocks could not run. They are not valid work to replay later.
   if (!state.commissioned) state.pendingEvent = null
+  pauseConversations(state)
   const elapsedMs = safeElapsed(saved.lastActiveAt, now)
   const before = state.productionCycles
   advanceFacility(state, now)
@@ -142,8 +149,17 @@ export function safeElapsed(from: number, now: number): number {
     ? Math.min(now - from, MAX_CATCHUP_MS) : 0
 }
 
+export function rememberNotableEvent(state: FacilityState, event: OperationalEvent): void {
+  const firstExtraction = event.operationCode === 112 && event.relatedIds.includes('first-extraction') && !state.notableEvents.some(e => e.operationCode === 112)
+  const commissioning = event.relatedIds.includes('commissioning') && !state.notableEvents.some(e => e.relatedIds.includes('commissioning'))
+  const repair = event.repair?.outcome === 'restored' && !state.notableEvents.some(e => e.repair?.faultId === event.repair?.faultId)
+  if ((firstExtraction || commissioning || repair) && !state.notableEvents.some(e => e.id === event.id)) state.notableEvents.push(JSON.parse(JSON.stringify(event)))
+}
+
 export function recordOperation(state: FacilityState, event: Omit<OperationalEvent, 'id' | 'operationAgeMs'>): void {
-  state.operations.push({ ...event, operationAgeMs: operationAgeAt(state, event.timestamp), id: `op-${state.nextOperationId++}` })
+  const record = { ...event, operationAgeMs: operationAgeAt(state, event.timestamp), id: `op-${state.nextOperationId++}` }
+  state.operations.push(record)
+  rememberNotableEvent(state, record)
   state.operations = state.operations.slice(-1000)
 }
 
@@ -154,9 +170,15 @@ function routine(state: FacilityState, timestamp: number, source: string, catego
 export function beginRequest(state: FacilityState, eventId: string, now: number): boolean {
   const event = findEvent(eventId)
   if (!event || !canStartEvent(state, event, now)) return false
+  const excavator = state.vessels.find(v => v.id === 'excavator-03')!
+  const hauler = state.vessels.find(v => v.id === 'hauler-02')!
+  if (event.type === 'mining' && excavator.assignment !== 'extraction') return false
+  if (event.type === 'docking' && (hauler.dockingState !== 'holding' || state.systems.berth !== 'open')) return false
+  if (event.type === 'maintenance' && state.systems.coolant !== 'nominal') return false
+  if (event.type === 'problem' && state.systems.scanner !== 'nominal') return false
   state.eventCooldowns[event.id] = now + event.cooldownMs
   state.pendingEvent = { eventId, requestedAt: now }
-  recordOperation(state, { timestamp: now, source: event.participants[0] ?? 'facility', category: event.type, summary: event.spokenLines.join(' '), relatedIds: event.participants, actionRequested: !event.immediateSafety, resolution: 'pending', reason: null })
+  recordOperation(state, { timestamp: now, source: event.participants[0] ?? 'facility', category: event.type, summary: event.spokenLines.join(' '), relatedIds: [event.id, ...event.participants], ...(event.operationCode ? { operationCode: event.operationCode } : {}), actionRequested: !event.immediateSafety, resolution: 'pending', reason: null })
   if (event.immediateSafety) applyPendingDecision(state, null, now)
   return true
 }
@@ -164,10 +186,13 @@ export function beginRequest(state: FacilityState, eventId: string, now: number)
 export function applyPendingDecision(state: FacilityState, key: KeypadKey | null, now: number): string | null {
   const pending = state.pendingEvent
   if (!pending) return null
-  const result = resolvePendingEvent(pending, key, now)
+  const cause = pendingCause(state)!
+  const deadline = responseDeadline(state, cause, pending.requestedAt + (findEvent(pending.eventId)?.responseTimeoutMs ?? 0))
+  const result = resolvePendingEvent(pending, key, now, deadline)
   if (!result.resolved) return null
   const event = findEvent(pending.eventId)
   state.pendingEvent = null
+  delete state.conversations[cause]
   if (!event) return result.message
   const automatic = result.autonomous
   const choice = automatic ? null : key
@@ -230,7 +255,7 @@ export function applyPendingDecision(state: FacilityState, key: KeypadKey | null
     reason = `${reason} ${explanation}`
     message = `${message} ${explanation}`
   }
-  recordOperation(state, { timestamp: now, source, category: event.type, summary: message, relatedIds: [...event.participants, ...(event.type === 'mining' ? [vessel.id] : event.type === 'docking' ? [hauler.id, 'berth-04'] : [event.type === 'maintenance' ? 'coolant' : event.type === 'problem' ? 'scanner' : 'berth-04'])], actionRequested: !event.immediateSafety, resolution: automatic || source === 'facility' ? 'autonomous' : 'manual', reason })
+  recordOperation(state, { timestamp: now, source, category: event.type, summary: message, relatedIds: [event.id, `${event.id}:choice:${choice ? event.choiceIds[choice] : 'crew'}`, ...event.participants, ...(event.type === 'mining' ? [vessel.id] : event.type === 'docking' ? [hauler.id, 'berth-04'] : [event.type === 'maintenance' ? 'coolant' : event.type === 'problem' ? 'scanner' : 'berth-04'])], actionRequested: !event.immediateSafety, resolution: automatic || source === 'facility' ? 'autonomous' : 'manual', reason })
   for (const miner of state.miners.filter((item) => event.participants.includes(item.id))) {
     miner.history = [...miner.history, message].slice(-100)
   }
@@ -251,7 +276,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
   scheduleRepairs(state, state.lastProcessedAt)
   while (true) {
     const pendingAt = state.pendingEvent
-      ? state.pendingEvent.requestedAt + (findEvent(state.pendingEvent.eventId)?.responseTimeoutMs ?? 0) : Infinity
+      ? responseDeadline(state, pendingCause(state)!, state.pendingEvent.requestedAt + (findEvent(state.pendingEvent.eventId)?.responseTimeoutMs ?? 0)) : Infinity
     // One early sensor report on the first active run; the persistent repair counter
     // prevents replay after reload. Later wear retains the conservative run cadence.
     const firstVessel = state.vessels.find((v) => v.id === 'excavator-03')!
@@ -282,6 +307,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
       routine(state, at, 'facility', 'maintenance', 'Ore scanner calibration complete.', ['scanner'], 'Automatic calibration restored reliable readings.')
     }
     advanceRepairs(state, at)
+    pruneConversations(state)
     for (const drone of state.repairDrones) {
       if (drone.assignedJobId !== null || drone.state !== 'servicing') continue
       if (drone.completesAt === null || drone.completesAt > at) continue
@@ -313,7 +339,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
         vessel.runsSinceService++
         detectOperationalWear(state, vessel, 'extraction', at)
         const canDeliver = miningEfficiency(vessel) > 0
-        routine(state, at, miningReporter(state, vessel), 'mining', `${vessel.name} completed extraction run ${vessel.run}. ${canDeliver ? `Returning with ${vessel.cargo} tonnes.` : `Holding ${vessel.cargo} tonnes safely pending repair.`}`, [vessel.id, vessel.minerId], canDeliver ? 'The assigned run is complete. Crew is delivering the cargo.' : 'The assigned run is complete; unsafe transit is suspended.', 112)
+        routine(state, at, miningReporter(state, vessel), 'mining', `${vessel.name} completed extraction run ${vessel.run}. ${canDeliver ? `Returning with ${vessel.cargo} tonnes.` : `Holding ${vessel.cargo} tonnes safely pending repair.`}`, [vessel.id, vessel.minerId, ...(state.productionCycles === 1 ? ['first-extraction'] : [])], canDeliver ? 'The assigned run is complete. Crew is delivering the cargo.' : 'The assigned run is complete; unsafe transit is suspended.', 112)
       } else if (state.systems.berth === 'isolated') {
         vessel.completesAt = state.systems.berthInspectionAt ?? at + SERVICE_MS
         vessel.dockingState = 'holding'
@@ -328,7 +354,7 @@ export function advanceFacility(state: FacilityState, now: number): void {
         vessel.cargo = 0
         const startsAt = Math.max(at, ...state.processingQueue.map((load) => load.completesAt))
         if (tonnes > 0) state.processingQueue.push({ id: `${vessel.id}-run-${vessel.run}`, vesselId: vessel.id, tonnes, completesAt: startsAt + PROCESSING_MS })
-        routine(state, at, vessel.minerId, 'docking', tonnes > 0 ? `${vessel.name} delivered ${tonnes} tonnes to Processor One.` : `${vessel.name} returned safely. Preparing the next assignment.`, [vessel.id, 'processor-01'], 'Cargo transferred before the next assignment.', 165)
+        routine(state, at, tonnes > 0 ? 'bea-kade' : vessel.minerId, 'docking', tonnes > 0 ? `${vessel.name} delivered ${tonnes} tonnes to Processor One.` : `${vessel.name} returned safely. Preparing the next assignment.`, [vessel.id, 'processor-01'], 'Cargo transferred before the next assignment.', 165)
         vessel.miningProgress = 0
         // Advance once at unload, including when the next assignment is held for service.
         if (tonnes > 0) vessel.run++
@@ -508,6 +534,7 @@ function extractionDuration(cut: 'stable' | 'dense'): number {
 export function commissionFacility(state: FacilityState, now: number): void {
   if (state.commissioned) return
   state.commissioned = true
+  rememberNotableEvent(state, { id: 'commissioning', timestamp: now, operationAgeMs: operationAgeAt(state, now), source: 'facility', category: 'mining', summary: 'Commissioning authorized. The staffed operation entered service; scheduled mining began.', relatedIds: ['commissioning'], actionRequested: false, resolution: 'manual', reason: 'Captain completed or delegated readiness checks.' })
   const vessel = state.vessels.find((item) => item.id === 'excavator-03')!
   vessel.assignment = 'extraction'
   vessel.dockingState = 'deployed'

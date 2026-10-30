@@ -2,18 +2,6 @@ import { operationCodes } from './operations'
 import type { CrewProfile, FacilityState, OperationalEvent, Vessel } from './types'
 
 // Presentation only: never use mood, temperament or experience to change safety actions.
-const phrases: Record<string, string[]> = {
-  'sol-arden': ['Steady work.', 'One stage at a time.'],
-  'tess-oren': ['Keeping the sequence clear.', 'One step, then the next.'],
-  'mara-vale': ['Keeping it orderly.', 'Room to work.'],
-  'iko-ren': ['One useful thing at a time.', 'Let the equipment finish.'],
-  'ada-sen': ['Keeping the figures clear.', 'That is the current reading.'],
-  'noor-ven': ['Keeping to the specification.', 'Precision first.'],
-  'eli-moss': ['Keeping the record straight.', 'One entry at a time.'],
-  'bea-kade': ['Giving the machinery room.', 'No prizes for rushing.'],
-  'oren-dax': ['Keeping the route clear.', 'Orderly traffic.'],
-}
-
 export function crewReport(state: FacilityState, event: Pick<OperationalEvent, 'source' | 'summary' | 'category' | 'operationCode'>): string {
   const crew = state.miners.find((person) => person.id === event.source)
   if (!crew) return event.summary
@@ -29,12 +17,6 @@ export function crewReport(state: FacilityState, event: Pick<OperationalEvent, '
       : crew.radioStyle === 'plain-first'
         ? `${fact} Code ${spokenCode}: ${operationCodes[code]}.`
         : `${operationCodes[code]}, code ${spokenCode}. ${fact}`
-  }
-  const bank = phrases[crew.id]
-  if (event.category !== 'safety' && event.category !== 'problem' && crew.currentMood !== 'focused' && !/\bPress\b/.test(text) && bank) {
-    const phrase = bank.find((line) => line !== crew.lastPhrase)!
-    crew.lastPhrase = phrase
-    text += ` ${phrase}`
   }
   return text
 }

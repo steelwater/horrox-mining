@@ -4,12 +4,13 @@ import { canUseNativeSpeech, speakNatively, stopNativeSpeech } from './nativeSpe
 
 export type SpeechContext = { kind: 'request' | 'response'; cause: string }
 
-type SpeechRequest = {
+export type SpeechHooks = { onStart?: () => void; onFinish?: (failed: boolean) => void; onInterrupt?: () => void }
+
+type SpeechRequest = SpeechHooks & {
   context?: SpeechContext
   text: string
   profileId: string
   priority: AudioPriority
-  onStart?: () => void
   next?: SpeechRequest
 }
 
@@ -22,6 +23,8 @@ export class AudioDirector {
   private playbackId = 0
   private stopping = false
   private currentRequest: SpeechRequest | null = null
+  private failedCauses = new Set<string>()
+  private startedCauses = new Set<string>()
   private exchangeTimer: ReturnType<typeof setTimeout> | null = null
 
   async startAmbience(): Promise<void> {
@@ -73,8 +76,8 @@ export class AudioDirector {
     oscillator.stop(this.context.currentTime + 0.08)
   }
 
-  speak(text: string, profileId = 'terminal', priority: AudioPriority = 3, context?: SpeechContext): void {
-    this.enqueue({ text, profileId, priority, context })
+  speak(text: string, profileId = 'terminal', priority: AudioPriority = 3, context?: SpeechContext, hooks: SpeechHooks = {}): void {
+    this.enqueue({ text, profileId, priority, context, ...hooks })
   }
 
   speakExchange(lines: ChatterLine[], onLine: (line: ChatterLine) => void): boolean {
@@ -95,15 +98,36 @@ export class AudioDirector {
     this.queue = this.queue.filter((request) => request.priority !== 5)
   }
 
+  /** Remove only optional exhibit speech or one obsolete prompt; preserve live radio. */
+  cancelOptional(): void { this.cancelWhere(request => request.priority === 6) }
+  cancelPrompt(cause: string): void {
+    this.failedCauses.delete(cause)
+    if (this.startedCauses.has(cause)) this.cancelWhere(request => request.context?.kind === 'request' && request.context.cause === cause)
+  }
+
+  private cancelWhere(matches: (request: SpeechRequest) => boolean): void {
+    this.queue = this.queue.filter(request => !matches(request))
+    if (!this.currentRequest || !matches(this.currentRequest)) return
+    this.currentRequest.onInterrupt?.()
+    this.currentRequest = null
+    this.playbackId++
+    this.speaking = false
+    this.currentPriority = null
+    this.stopping = true
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
+    void stopNativeSpeech().catch(console.warn).finally(() => { this.stopping = false; this.playNext() })
+  }
+
   private enqueue(request: SpeechRequest): void {
     const { priority } = request
     const nativeSpeech = canUseNativeSpeech()
 
-    if (priority < 5) this.cancelChatter()
-    if (this.speaking && this.currentPriority !== null && ((priority === 1 && this.currentPriority !== 1) || (priority < 5 && this.currentPriority === 5))) {
+    if (priority < 5) { this.cancelChatter(); this.queue = this.queue.filter(item => item.priority !== 6) }
+    if (this.speaking && this.currentPriority !== null && ((priority === 1 && this.currentPriority !== 1) || (priority < 5 && this.currentPriority >= 5))) {
       this.queue.unshift(request)
       // Preserve interrupted operational context so its answer cannot become orphaned.
       if (this.currentRequest?.context) this.queue.push(this.currentRequest)
+      this.currentRequest?.onInterrupt?.()
       this.currentRequest = null
       this.playbackId += 1
       this.speaking = false
@@ -124,11 +148,14 @@ export class AudioDirector {
 
   stop(): void {
     this.cancelChatter()
+    this.currentRequest?.onInterrupt?.()
+    this.queue.forEach(request => request.onInterrupt?.())
     this.currentRequest = null
     this.queue = []
     this.playbackId += 1
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
-    void stopNativeSpeech().catch(console.warn)
+    this.stopping = true
+    void stopNativeSpeech().catch(console.warn).finally(() => { this.stopping = false; this.playNext() })
     this.speaking = false
     this.currentPriority = null
     this.setAmbienceLevel(0.025)
@@ -143,6 +170,10 @@ export class AudioDirector {
     if (!request) return
 
     this.currentRequest = request
+    if (request.context?.kind === 'request') {
+      this.startedCauses.add(request.context.cause)
+      if (this.startedCauses.size > 100) this.startedCauses.delete(this.startedCauses.values().next().value!)
+    }
     request.onStart?.()
     const profile = voiceProfiles.find((item) => item.id === request.profileId) ?? voiceProfiles[0]!
     this.speaking = true
@@ -170,7 +201,7 @@ export class AudioDirector {
     }
 
     if (typeof speechSynthesis === 'undefined') {
-      this.finishSpeech(playbackId)
+      this.finishSpeech(playbackId, true)
       return
     }
 
@@ -182,16 +213,23 @@ export class AudioDirector {
     utterance.onend = () => this.finishSpeech(playbackId)
     utterance.onerror = () => this.finishSpeech(playbackId, true)
 
-    speechSynthesis.speak(utterance)
+    try { speechSynthesis.speak(utterance) } catch { this.finishSpeech(playbackId, true) }
   }
 
   private finishSpeech(playbackId: number, failed = false): void {
     if (playbackId !== this.playbackId) return
-    const next = failed ? undefined : this.currentRequest?.next
+    const completed = this.currentRequest
+    const next = failed ? undefined : completed?.next
     this.currentRequest = null
     this.speaking = false
     this.currentPriority = null
     this.setAmbienceLevel(0.025)
+    const cause = completed?.context?.kind === 'request' ? completed.context.cause : undefined
+    if (failed && cause) this.failedCauses.add(cause)
+    if (completed && !this.queue.some(request => request.context?.kind === 'request' && request.context.cause === cause)) {
+      completed.onFinish?.(failed || !!(cause && this.failedCauses.has(cause)))
+      if (cause) this.failedCauses.delete(cause)
+    }
     if (next) {
       this.exchangeTimer = setTimeout(() => {
         this.exchangeTimer = null
