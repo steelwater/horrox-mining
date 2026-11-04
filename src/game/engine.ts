@@ -1,7 +1,7 @@
 import { pendingCause, responseDeadline, pauseConversations, pruneConversations } from './conversations'
 import { autonomyExplanation, miningReporter, updateCrewState } from './crew'
 import { quantity } from './text'
-import { activeFaults, advanceRepairs, detectFault, detectOperationalWear, droneStatus, miningEfficiency, pendingFaults, repairDeadlines, faultLibrary, scheduleRepairs, vesselRepairStatus } from './repairs'
+import { activeFaults, diagnosticProgress, advanceRepairs, detectFault, detectOperationalWear, droneStatus, miningEfficiency, pendingFaults, repairDeadlines, faultLibrary, scheduleRepairs, vesselRepairStatus } from './repairs'
 import { OPERATION_START, operationAgeAt, formatOperationTime } from './calendar'
 import { events, miners } from './content'
 import type { EventDefinition, FacilityState, KeypadKey, PendingEvent, OperationalEvent } from './types'
@@ -438,12 +438,10 @@ export function shouldBriefOnReturn(state: FacilityState, since: number, now: nu
     || state.repairDrones.some((drone) => drone.maintenanceDue)
     || state.systems.berth === 'isolated' || state.systems.coolant === 'inspection' || state.systems.scanner === 'manual-sampling'
   const meaningfulChange = state.operations.some((entry) => Number(entry.id.replace('op-', '')) >= previousOperationId && entry.category !== 'chatter' && entry.category !== 'command')
-  if (warnings || state.pendingEvent || pendingFaults(state).length || meaningfulChange) return true
-  // Briefing age does not turn a momentary, unchanged reconnect into an absence.
-  if (now - since < 60_000) return false
-  if (now - since >= 5 * 60_000) return true
-  const last = state.transcript.filter((entry) => entry.text.startsWith('Captain terminal connected.')).at(-1)
-  return !last || !last.text.includes(operationalStatus(state))
+  if (meaningfulChange) return true
+  const text = returnBriefing(state, since, now)
+  if (state.transcript.some(entry => entry.speaker === 'Facility Control' && entry.text === text && now - entry.timestamp >= 0 && now - entry.timestamp < 60_000)) return false
+  return !!(warnings || state.pendingEvent || pendingFaults(state).length || now - since >= 60_000)
 }
 
 export function absenceReport(event: OperationalEvent): string {
@@ -487,28 +485,44 @@ function longAbsenceSummary(state: FacilityState, since: number, now: number): s
 
 export function returnBriefing(state: FacilityState, since: number, now: number): string {
   if (!state.commissioned) return `Captain terminal connected. ${COMMISSIONING_NOTICE}`
-  if (Number.isFinite(since) && now - since >= 30 * 60_000) return longAbsenceSummary(state, since, now)
+  const urgent = state.operations.filter(event => event.timestamp > since && event.category === 'safety' && event.operationCode !== 390).at(-1)
+  const urgentText = urgent ? `${absenceReport(urgent)} ` : ''
+  const elapsed = Number.isFinite(since) ? Math.max(0, now - since) : 0
   const requests = pendingFaults(state)
+  if (elapsed >= 30 * 60_000) return `${urgentText}${requests.length || state.pendingEvent ? 'Captain action pending. ' : ''}${longAbsenceSummary(state, since, now)}`
   const pendingRepair = requests.find(({ fault }) => fault.emergency) ?? requests[0]
   if (pendingRepair) {
     const { vessel, fault } = pendingRepair
     const reporter = fault.type === 'communications-failure' ? 'Telemetry' : state.miners.find((miner) => miner.id === vessel.minerId)?.callsign ?? vessel.name
-    return `Captain terminal connected. ${quantity(requests.length, 'service request')} awaiting your decision. ${reporter} reported ${faultLibrary[fault.type].name.toLowerCase()} on ${vessel.name} at ${formatOperationTime(operationAgeAt(state, fault.detectedAt))}. Press 3 for vessel support.${state.pendingEvent ? ' Another crew request is also pending; press 0 to hear it.' : ''}`
+    return `Captain terminal connected. ${urgentText}${quantity(requests.length, 'service request')} awaiting your decision. ${reporter} reported ${faultLibrary[fault.type].name.toLowerCase()} on ${vessel.name} at ${formatOperationTime(operationAgeAt(state, fault.detectedAt))}. Press 3 for vessel support.${state.pendingEvent ? ' Another crew request is also pending; press 0 to hear it.' : ''}`
   }
-  if (state.pendingEvent) return `Captain terminal connected. A crew request is awaiting your decision. Press 0 to hear the request and choices.`
+  if (state.pendingEvent) return `Captain terminal connected. ${urgentText}A crew request is awaiting your decision. Press 0 to hear the request and choices.`
 
-  const elapsed = Number.isFinite(since) ? Math.max(0, now - since) : 0
+  const current = state.repairJobs.filter(job => job.state !== 'complete').map(job => {
+    const vessel = state.vessels.find(v => v.id === job.vesselId)!
+    return `${vessel.name}: ${diagnosticProgress(state, vessel, job)}`
+  })
+  for (const vessel of state.vessels) {
+    if (!state.repairJobs.some(job => job.vesselId === vessel.id && job.state !== 'complete')) {
+      if (activeFaults(vessel).length) current.push(activeFaults(vessel).map(fault => vesselRepairStatus(state, vessel, fault)).join(' '))
+      else if (vessel.routineServiceDue) current.push(`${vessel.name}: routine service pending or in progress.`)
+      else if (vessel.dockingState === 'holding') current.push(`${vessel.name} is holding.`)
+    }
+  }
+  if (state.systems.berth === 'isolated') current.push('Berth Four is isolated for pressure inspection.')
+  if (state.systems.coolant === 'inspection') current.push('Coolant inspection is in progress.')
+  if (state.systems.scanner !== 'nominal') current.push('Ore scanner readings remain under corrective procedure.')
   const recent = state.operations.filter((event) => event.timestamp > since && event.category !== 'chatter' && event.category !== 'command')
   // Summarize each repair once; the full transit/service sequence belongs in history.
   const completedFaults = new Set(recent.filter((e) => e.operationCode === 245 && e.repair).map((e) => e.repair!.faultId))
   const entries = recent.filter((event, index) => !event.repair || (completedFaults.has(event.repair.faultId)
     ? event.operationCode === 245
     : !recent.slice(index + 1).some((later) => later.repair?.faultId === event.repair!.faultId)))
-  const priority = (event: OperationalEvent) => event.operationCode === 245 || event.operationCode === 390 ? -1 : event.category === 'safety' || (event.actionRequested && event.resolution === 'autonomous') ? 0 : event.category === 'maintenance' ? 1 : 2
-  const selected = [...entries].sort((a, b) => priority(a) - priority(b) || b.timestamp - a.timestamp).slice(0, 4).sort((a, b) => a.timestamp - b.timestamp)
+  const priority = (event: OperationalEvent) => event.category === 'safety' && event.operationCode !== 390 ? -2 : event.operationCode === 245 || event.operationCode === 390 ? -1 : event.actionRequested && event.resolution === 'autonomous' ? 0 : event.category === 'maintenance' ? 1 : 2
+  const selected = [...entries].sort((a, b) => priority(a) - priority(b) || b.timestamp - a.timestamp).slice(0, elapsed < 5 * 60_000 ? 1 : 4)
   const minutes = Math.floor(elapsed / 60_000)
   const duration = minutes >= 60 ? `${quantity(Math.floor(minutes / 60), 'hour')} and ${quantity(minutes % 60, 'minute')}` : minutes === 0 ? 'less than 1 minute' : quantity(minutes, 'minute')
-  return `Captain terminal connected. Elapsed since last connection: ${duration}. ${elapsed > MAX_CATCHUP_MS ? 'Catch-up is limited to seven days of operations. ' : ''}${selected.length ? `During your absence: ${selected.map((event) => `${formatOperationTime(event.operationAgeMs)}: ${absenceReport(event)}`).join(' ')}` : 'No significant operational changes during your absence.'} ${recent.some((event) => event.resolution === 'autonomous' && event.reason?.includes('response window elapsed')) ? 'Facility Control resolved requests autonomously while you were unavailable, after their response windows elapsed. ' : ''}No intervention is required. ${operationalStatus(state)} Press 0 for current status. Operational history is available in the terminal.`
+  return `Captain terminal connected. Elapsed since last connection: ${duration}. ${elapsed > MAX_CATCHUP_MS ? 'Catch-up is limited to seven days of operations. ' : ''}${selected.length ? `During your absence: ${selected.map((event) => `${formatOperationTime(event.operationAgeMs)}: ${absenceReport(event)}`).join(' ')}` : 'No significant operational changes during your absence.'} ${recent.some((event) => event.resolution === 'autonomous' && event.reason?.includes('response window elapsed')) ? 'Facility Control resolved requests autonomously while you were unavailable, after their response windows elapsed. ' : ''}${current.join(' ')} No new decisions are pending. Press 0 for current status.`
 }
 
 function dispatchRoutineService(state: FacilityState, at: number): void {

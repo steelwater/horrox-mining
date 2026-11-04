@@ -137,11 +137,11 @@ describe('repair requests and reconnects', () => {
     expect(shouldBriefOnReturn(state, start, start + 1000, state.nextOperationId - 1)).toBe(true)
   })
 
-  it('always briefs pending decisions and existing warnings even on a momentary reconnect', () => {
+  it('deduplicates an identical pending reminder but reports changed warnings on a momentary reconnect', () => {
     const state = operation()
     state.pendingEvent = { eventId: 'docking-hauler-two', requestedAt: start }
     state.transcript.push({ id: 'brief', timestamp: start, operationAgeMs: 0, priority: 2, speaker: 'Facility Control', text: returnBriefing(state, start, start) })
-    expect(shouldBriefOnReturn(state, start, start + 1000, state.nextOperationId)).toBe(true)
+    expect(shouldBriefOnReturn(state, start, start + 1000, state.nextOperationId)).toBe(false)
     state.pendingEvent = null
     state.systems.berth = 'isolated'
     expect(shouldBriefOnReturn(state, start, start + 1000, state.nextOperationId)).toBe(true)
@@ -202,5 +202,24 @@ describe('repair requests and reconnects', () => {
     expect(returnBriefing(state, start, start + 2000)).toContain('less than 1 minute.')
     expect(returnBriefing(state, start, start + minute)).toContain('1 minute.')
     expect(returnBriefing(state, start, start + 61 * minute)).toContain('1 hour and 1 minute.')
+  })
+
+  it('keeps short unchanged returns concise and prioritizes a new emergency over a pending reminder', () => {
+    const state = operation()
+    const short = returnBriefing(state, start, start + 10_000)
+    expect(short).toContain('Hauler Two is holding')
+    expect(short).not.toContain('Operations nominal')
+    expect(short).not.toContain('Processor One')
+    expect(short.length).toBeLessThan(350)
+    state.pendingEvent = { eventId: 'maintenance-coolant', requestedAt: start }
+    const repeated = returnBriefing(state, start, start + 10_000)
+    state.transcript.push({ id: 'return', timestamp: start + 10_000, operationAgeMs: 10_000, priority: 2, speaker: 'Facility Control', text: repeated })
+    const before = state.nextOperationId
+    recordOperation(state, { timestamp: start + 11_000, source: 'facility', category: 'safety', summary: 'Berth Four isolated. Crew clear.', relatedIds: ['berth-04'], actionRequested: false, resolution: 'autonomous', reason: 'Pressure inspection.' })
+    expect(shouldBriefOnReturn(state, start + 10_000, start + 12_000, before)).toBe(true)
+    const urgent = returnBriefing(state, start + 10_000, start + 12_000)
+    expect(urgent.indexOf('Berth Four isolated')).toBeLessThan(urgent.indexOf('awaiting your decision'))
+    state.pendingEvent = null
+    expect(returnBriefing(state, start, start + 31 * minute)).toContain('Current state:')
   })
 })

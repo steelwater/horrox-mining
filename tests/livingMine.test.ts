@@ -199,7 +199,7 @@ describe('decisions and operational record', () => {
     advanceFacility(state, start + 20 * minute)
     const briefing = returnBriefing(state, start, start + 20 * minute)
     expect(briefing).toContain('Facility control has assigned manual sampling')
-    expect(briefing).toContain('No intervention is required')
+    expect(briefing).toContain('No new decisions are pending')
     expect(operationalStatus(state)).toContain('1 mining vessel active')
     expect(operationalStatus(state)).toContain('1 available')
     expect(state.operations.map((e) => e.timestamp)).toEqual(state.operations.map((e) => e.timestamp).sort((a, b) => a - b))

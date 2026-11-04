@@ -11,7 +11,7 @@ import type { KeypadKey } from './game/types'
 
 const booting = ref(true)
 const {
-  beginKey, endKey, protectedKey, updateProtection, holdProgress, inputNotice, conversationStatus, playInformation, stopInformation,
+  beginKey, endKey, keypadKeydown, keypadKeyup, protectedKey, updateProtection, holdProgress, inputNotice, conversationStatus, playInformation, stopInformation,
   importing,
   portableSnapshot,
   importSnapshot,
@@ -237,6 +237,8 @@ window.setTimeout(() => {
           @pointerup="endKey(key)"
           @pointercancel="endKey(key)"
           @lostpointercapture="endKey(key)"
+          @keydown="keypadKeydown($event, key)"
+          @keyup="keypadKeyup($event, key)"
           @click="if ($event.detail === 0) { beginKey(key, true); endKey(key, true) }"
         >
           <span>{{ key }}</span>

@@ -131,7 +131,9 @@ describe('Playtest 1007 operations follow-up', () => {
     advanceFacility(state, start + 15 * minute)
     assertTotals(state)
     const report = returnBriefing(state, start, start + 15 * minute)
-    expect(report).toContain('0 mining vessels active. 0 docked. 1 in transit (Excavator Three). 1 holding (Hauler Two).')
+    expect(report).toContain('Excavator Three completed extraction run 1. Returning with 12 tonnes.')
+    expect(report).toContain('Hauler Two is holding.')
+    expect(report).not.toContain('mining vessels active')
     // A stale assignment must not count an approaching vessel as actively mining too.
     state.vessels[0]!.assignment = 'extraction'
     state.vessels[0]!.dockingState = 'approaching'

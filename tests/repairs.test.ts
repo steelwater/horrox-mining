@@ -141,6 +141,25 @@ describe('repair resources and lifecycle', () => {
     expect(state.repairJobs).toHaveLength(1)
   })
 
+  it('explains isolated berth waiting and starts the authorized dock repair when clearance returns', () => {
+    const { state, vessel, fault } = setup('cargo-jam')
+    vessel.dockingState = 'docked'
+    state.systems.berth = 'isolated'
+    state.systems.berthInspectionAt = start + minute
+    decideRepair(state, vessel, fault, 'dock', start)
+    expect(state.repairJobs[0]!.state).toBe('waiting')
+    const report = decideRepair(state, vessel, fault, 'diagnostics', start)
+    expect(report).toContain('Berth Four remains isolated pending pressure inspection')
+    expect(report).toContain(`${vessel.name} is secured`)
+    expect(report).toContain('automatic start after clearance and dockside crew are available')
+    expect(report).not.toContain('Waiting for available repair resources')
+    advanceFacility(state, start + minute)
+    expect(state.repairJobs[0]!.state).toBe('servicing')
+    expect(state.repairJobs[0]!.serviceStartedAt).toBe(start + minute)
+    expect(decideRepair(state, vessel, fault, 'diagnostics', start + minute)).toContain('Dockside crew servicing')
+    expect(state.repairJobs).toHaveLength(1)
+  })
+
   it('reserves a remote drone through dispatch, transit, service and return', () => {
     const { state, vessel, fault } = setup()
     decideRepair(state, vessel, fault, 'drone', start)

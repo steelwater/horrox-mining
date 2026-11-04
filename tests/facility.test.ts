@@ -388,6 +388,46 @@ describe('spoken terminal commands', () => {
     expect(facility.state.oreProcessed).toBe(12)
   })
 
+  it('loads once when connection retries overlap', async () => {
+    vi.stubGlobal('window', { setInterval: vi.fn() })
+    let finish!: (state: null) => void
+    vi.mocked(loadFacility).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const facility = useFacility()
+    const attempts = [facility.initialize(), facility.initialize(), facility.initialize()]
+    expect(loadFacility).toHaveBeenCalledOnce()
+    finish(null)
+    await Promise.all(attempts)
+    expect(speech.speak).toHaveBeenCalledOnce()
+    expect(facility.state.transcript).toHaveLength(1)
+  })
+
+  it('speaks at most one unchanged repair reminder across rapid resumes', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(1_800_000_000_000)
+    const listeners: Record<string, () => void> = {}
+    const doc = { hidden: false, addEventListener: (name: string, callback: () => void) => { listeners[name] = callback } }
+    vi.stubGlobal('document', doc)
+    vi.stubGlobal('window', { setInterval: vi.fn(), addEventListener: vi.fn() })
+    const facility = useFacility(); lifecycle.mounted[0]!()
+    await facility.initialize(); facility.skipOnboarding()
+    detectFault(facility.state, 'excavator-03', 'communications-failure', Date.now())
+    await facility.pressKey('3'); await facility.pressKey('2')
+    vi.setSystemTime(Date.now() + 1001)
+    const resume = () => { doc.hidden = true; listeners.visibilitychange!(); vi.setSystemTime(Date.now() + 10); doc.hidden = false; listeners.visibilitychange!() }
+    resume()
+    const before = facility.state.operations.length
+    speech.speak.mockClear()
+    // The first return may describe the dispatch transition; unchanged returns share one reminder.
+    resume(); resume(); resume()
+    const reconnects = speech.speak.mock.calls.filter(([text]) => text.startsWith('Captain terminal connected.'))
+    expect(reconnects.length).toBeLessThanOrEqual(1)
+    expect(facility.state.operations).toHaveLength(before)
+    const reminder = facility.state.transcript.filter(entry => entry.text.startsWith('Captain terminal connected.')).at(-1)!.text
+    expect(reminder).toContain('Repair Drone One en route')
+    expect(reminder).not.toContain('Operations nominal')
+    expect(reminder).not.toContain('Processor One')
+
+  })
+
   it('does not reinterpret an expired response as an emergency command', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(1_800_000_000_000)
@@ -745,6 +785,35 @@ describe('spoken terminal commands', () => {
     expect(facility.state.autopilotEnabled).toBe(false)
     facility.endKey('9', true)
     facility.beginKey('9', true)
+    expect(facility.state.autopilotEnabled).toBe(true)
+    expect(facility.state.operations.filter(e => e.category === 'command')).toHaveLength(1)
+    facility.cancelInput()
+  })
+
+  it.each(['Enter', ' '])('requires release and a second %j activation on a focused keypad button', async (key) => {
+    vi.useFakeTimers(); vi.setSystemTime(1_800_000_000_000)
+    const facility = useFacility(); facility.ready.value = true
+    commissionFacility(facility.state, Date.now()); facility.state.onboardingStatus = 'complete'
+    const event = (repeat = false) => ({ key, repeat, preventDefault: vi.fn(), stopPropagation: vi.fn() } as unknown as KeyboardEvent)
+    const down = event()
+    facility.keypadKeydown(down, '9')
+    expect(down.preventDefault).toHaveBeenCalledOnce()
+    expect(down.stopPropagation).toHaveBeenCalledOnce()
+    for (let i = 0; i < 8; i++) {
+      await vi.advanceTimersByTimeAsync(500)
+      const repeated = event(true)
+      facility.keypadKeydown(repeated, '9')
+      expect(repeated.preventDefault).toHaveBeenCalledOnce()
+    }
+    expect(facility.state.autopilotEnabled).toBe(false)
+    expect(facility.state.operations.filter(e => e.category === 'command')).toHaveLength(0)
+    const up = event()
+    facility.keypadKeyup(up, '9')
+    expect(up.preventDefault).toHaveBeenCalledOnce()
+    expect(up.stopPropagation).toHaveBeenCalledOnce()
+    expect(facility.state.autopilotEnabled).toBe(false)
+    facility.keypadKeydown(event(), '9')
+    facility.keypadKeyup(event(), '9')
     expect(facility.state.autopilotEnabled).toBe(true)
     expect(facility.state.operations.filter(e => e.category === 'command')).toHaveLength(1)
     facility.cancelInput()

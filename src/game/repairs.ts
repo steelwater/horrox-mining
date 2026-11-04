@@ -145,10 +145,18 @@ export function droneStatus(state: FacilityState): string {
   return state.repairDrones.map((d) => `${d.name}: ${d.state.replaceAll('-', ' ')} at ${d.location}. ${d.targetId ? `Assigned to ${state.vessels.find((v) => v.id === d.targetId)?.name ?? d.targetId}.` : ''} ${d.maintenanceDue ? 'Maintenance required before reuse.' : 'Maintenance current.'}`).join(' ')
 }
 
-function diagnosticProgress(state: FacilityState, vessel: Vessel, job: RepairJob): string {
+export function diagnosticProgress(state: FacilityState, vessel: Vessel, job: RepairJob): string {
   const drone = state.repairDrones.find((item) => item.id === job.assignedDroneId)
   switch (job.state) {
-    case 'waiting': return 'Waiting for available repair resources. Service has not started.'
+    case 'waiting': {
+      if (state.repairJobs.some(other => other.id !== job.id && other.vesselId === vessel.id && other.state !== 'complete' && other.state !== 'waiting')) return 'Waiting for the other authorized repair on this vessel. Service has not started.'
+      if (job.method === 'dock' && vessel.dockingState === 'docked') {
+        const competing = state.repairJobs.some(other => other.id !== job.id && other.method === 'dock' && other.state === 'servicing')
+        if (state.systems.berth === 'isolated') return `Dock repair authorized. Berth Four remains isolated pending pressure inspection. ${vessel.name} is secured. ${competing ? 'Another dock repair also occupies the service crew.' : 'Dockside service remains queued for automatic start after clearance and dockside crew are available.'}`
+        if (competing) return 'Waiting for dockside crew to finish another authorized repair. Service has not started.'
+      }
+      return 'Waiting for available repair resources. Service has not started.'
+    }
     case 'dispatched': return `${drone!.name} assigned and dispatched. Service has not started.`
     case 'in-transit': return `${drone!.name} en route. Service has not started.`
     case 'returning-vessel': return `Returning for dockside service.${drone ? ` ${drone.name} providing recovery support.` : ''} Service has not started.`

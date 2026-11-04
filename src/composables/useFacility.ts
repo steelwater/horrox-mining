@@ -121,6 +121,20 @@ export function useFacility() {
   }
   function updateProtection(): void { cancelInput(); void persist() }
 
+  function keypadKeydown(event: KeyboardEvent, key: KeypadKey): void {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    // Suppress native button clicks, including Enter's repeated detail-zero clicks.
+    event.preventDefault()
+    event.stopPropagation()
+    if (!event.repeat) beginKey(key, true)
+  }
+  function keypadKeyup(event: KeyboardEvent, key: KeypadKey): void {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    event.stopPropagation()
+    endKey(key, true)
+  }
+
 
   const pendingEvent = computed(() => state.pendingEvent ? findEvent(state.pendingEvent.eventId) : pendingFaults(state).length ? { type: 'vessel support' } : null)
   const onboardingActive = computed(() => state.onboardingStatus === 'active')
@@ -174,27 +188,31 @@ export function useFacility() {
     }
   }
 
+  let initializing = false
   async function initialize(): Promise<void> {
-    if (ready.value) return
-    let saved: FacilityState | null
-    try { saved = await loadFacility() } catch (error) {
-      storageError.value = error instanceof Error ? error.message : 'Saved operation unavailable. Please retry.'
-      return
-    }
-    const now = Date.now()
-    if (saved) {
-      const restored = restoreState(saved, now)
-      Object.assign(state, restored.state)
-      pauseReadiness()
-      if (shouldBriefOnReturn(state, saved.lastActiveAt, now, saved.nextOperationId)) announce(returnBriefing(state, saved.lastActiveAt, now), 'Facility Control', 'terminal', 2)
-    } else {
-      Object.assign(state, createInitialState(now))
-      announce(operationalStatus(state), 'Facility Control', 'terminal', 2)
-    }
-    state.lastActiveAt = now
-    ready.value = true
-    await persist()
-    scheduleTimers()
+    if (ready.value || initializing) return
+    initializing = true
+    try {
+      let saved: FacilityState | null
+      try { saved = await loadFacility() } catch (error) {
+        storageError.value = error instanceof Error ? error.message : 'Saved operation unavailable. Please retry.'
+        return
+      }
+      const now = Date.now()
+      if (saved) {
+        const restored = restoreState(saved, now)
+        Object.assign(state, restored.state)
+        pauseReadiness()
+        announceReturn(saved.lastActiveAt, now, saved.nextOperationId)
+      } else {
+        Object.assign(state, createInitialState(now))
+        announce(operationalStatus(state), 'Facility Control', 'terminal', 2)
+      }
+      state.lastActiveAt = now
+      ready.value = true
+      await persist()
+      scheduleTimers()
+    } finally { initializing = false }
   }
 
   async function pressKey(key: KeypadKey): Promise<void> {
@@ -419,9 +437,16 @@ export function useFacility() {
     }
   }
 
+  function announceReturn(since: number, now: number, previousOperationId: number): void {
+    if (!shouldBriefOnReturn(state, since, now, previousOperationId)) return
+    const urgent = state.operations.some(entry => Number(entry.id.replace('op-', '')) >= previousOperationId && entry.category === 'safety' && entry.operationCode !== 390)
+    announce(returnBriefing(state, since, now), 'Facility Control', 'terminal', urgent ? 1 : 2)
+  }
+
   function onVisibilityChange(): void {
     if (!ready.value || importing.value) return
     if (document.hidden) {
+      if (suspendedAt !== null) return
       tick()
       pauseReadiness()
       cancelInput()
@@ -436,7 +461,7 @@ export function useFacility() {
       const before = state.nextOperationId
       advanceFacility(state, Date.now())
       recordAbsence(before)
-      if (shouldBriefOnReturn(state, since, Date.now(), before)) announce(returnBriefing(state, since, Date.now()), 'Facility Control', 'terminal', 2)
+      announceReturn(since, Date.now(), before)
       state.lastActiveAt = Date.now()
       void persist()
     }
@@ -581,7 +606,7 @@ export function useFacility() {
   })
 
   return {
-    beginKey, endKey, cancelInput, protectedKey, updateProtection, holdProgress, inputNotice, conversationStatus,
+    beginKey, endKey, keypadKeydown, keypadKeyup, cancelInput, protectedKey, updateProtection, holdProgress, inputNotice, conversationStatus,
     playInformation: (text: string) => { audio.cancelOptional(); audio.speak(text, 'terminal', 6) },
     stopInformation: () => audio.cancelOptional(),
     importing,
