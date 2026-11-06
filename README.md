@@ -77,6 +77,57 @@ Minerva mining infrastructure predates the staffed operation in this game. The e
 
 The Horrox orbital station remains a separate piece of infrastructure from the Minerva mining facility.
 
+### Minerva atmosphere and weather
+
+Minerva has a **thin, non-breathable atmosphere**. It is substantial enough to move fine mineral dust, create haze, support weak-to-moderate winds, and produce electrically charged atmospheric disturbances, but it does not make Minerva Earth-like. Exterior personnel still require pressure protection.
+
+Normal conditions can include:
+
+- clear thin-air periods
+- drifting mineral-dust haze
+- thermal gust fronts
+- charged-dust disturbances
+- ion/electrostatic interference
+- occasional severe low-visibility events
+
+Weather is usually an inconvenience rather than a hazard. Most shifts remain clear enough for normal operations.
+
+Charged particulate and ion disturbances can temporarily cause radio noise, delayed or repeated transmissions, sensor uncertainty, brief display flicker or interference, navigation-confidence reductions, and protective resets or recalibration of exterior mechanical equipment. These effects should usually clear without permanent damage.
+
+Dust and haze can reduce exterior visibility enough to slow or temporarily suspend:
+
+- launches and approaches
+- docking
+- EVA
+- surface Cargo Mech movement
+- other exterior maintenance or handling work
+
+Internal Refining, Grading, Storage, Maintenance, crew activity, and the Cantina normally continue during a weather hold.
+
+Weather effects are spatially sensible. A surface dust front strongly affects the Minerva facility and its atmospheric flight corridor, while a mining vessel already operating well outside the atmosphere may continue safely under standing procedure. Communications passing through the disturbed atmospheric layer may still degrade.
+
+Fran and facility sensors normally provide useful warning before stronger conditions so crews can finish an exterior task, delay departure, secure equipment, or return personnel inside. Weather severity uses restrained operational states such as **NORMAL**, **ADVISORY**, **DISTURBANCE**, and **HOLD**.
+
+The environmental operations-code family includes:
+
+- **810** — atmospheric disturbance advisory
+- **815** — communications interference
+- **820** — low-visibility condition
+- **825** — exterior operations hold
+- **890** — environmental condition cleared
+
+These codes supplement plain-language reports rather than replacing them.
+
+A typical Fran report may sound like:
+
+> “Atmospheric advisory. Charged particulate density is increasing west of the facility. Exterior visibility currently seventy-two percent.”
+
+A stronger event may lead to:
+
+> “Low-visibility condition. Exterior operations hold is now in effect. Docking and surface traffic suspended pending review.”
+
+When conditions clear, operations simply resume. The aftermath may require a sensor check, a Mech recalibration, delayed transport scheduling, or somebody complaining about Minerva dust getting into equipment that was supposedly sealed.
+
 ### Launch Day
 
 The operation starts on **17 September 2075**. First run is the actual **Launch Day / Commissioning Sequence** for 1st Horrox Mining Ltd. Facility Control confirms its identity and the date, then guides mining-system, vessel, docking, power, processing, communications, repair-drone/support, crew, and autopilot checks before final readiness confirmation. Checks can be delegated safely; later readiness reviews do not restart the operation.
