@@ -6,6 +6,7 @@ import { activeFaults, activeJob, decideRepair, droneStatus, pendingFaults, repa
 import { operationAgeAt } from '../game/calendar'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { AudioDirector, type SpeechContext } from '../audio/audioDirector'
+import { instructionForKey } from '../game/keypadGuidance'
 import { miners } from '../game/content'
 import {
   advanceFacility,
@@ -43,7 +44,9 @@ export function useFacility() {
   const inputNotice = ref('')
   const holdProgress = ref(0)
   const inputRevision = ref(0)
-  let held: { key: KeypadKey; context: string; cause: string | null; startedAt: number; keyboard: boolean; released: boolean } | null = null
+  let lastHoldCoachingAt = -Infinity
+  let holdCoachingCount = 0
+  let held: { key: KeypadKey; context: string; cause: string | null; startedAt: number; keyboard: boolean; released: boolean; priorDeadline: number | null } | null = null
   let holdTimer: ReturnType<typeof setInterval> | null = null
   const conversationStatus = computed(() => {
     inputRevision.value
@@ -90,9 +93,10 @@ export function useFacility() {
     cancelInput()
     const cause = selectedCause()
     if (cause && now >= responseDeadline(state, cause, Infinity)) { tick(); inputNotice.value = 'Response expired. Press 0 for status.'; return }
-    held = { key, context: inputContext(), cause, startedAt: now, keyboard, released: false }
+    const priorDeadline = cause && state.conversations[cause]?.phase === 'response' ? state.conversations[cause]!.deadline : null
+    held = { key, context: inputContext(), cause, startedAt: now, keyboard, released: false, priorDeadline }
     if (cause && state.conversations[cause]) state.conversations[cause] = { phase: 'holding', deadline: null }
-    inputNotice.value = keyboard ? `Release, wait ${state.keypadProtection.holdSeconds} seconds, then press ${key} again to confirm. Key repeat cannot confirm.` : `Hold ${key} for ${state.keypadProtection.holdSeconds} seconds. Release to cancel.`
+    inputNotice.value = instructionForKey(key, 'authorization', true, state.keypadProtection.holdSeconds, keyboard ? 'keyboard' : 'touch')
     holdTimer = setInterval(() => {
       if (!held) return
       if (held.context !== inputContext()) { cancelInput(); return }
@@ -109,7 +113,7 @@ export function useFacility() {
     if (holdTimer) clearInterval(holdTimer)
     holdTimer = null
     holdProgress.value = 0
-    inputNotice.value = ''
+    inputNotice.value = `AUTHORIZED — KEY ${input.key}`
     void pressKey(input.key).finally(() => {
       if (input.cause && state.conversations[input.cause]?.phase === 'holding') state.conversations[input.cause] = { phase: 'paused', deadline: null }
     })
@@ -117,7 +121,26 @@ export function useFacility() {
   function endKey(key?: KeypadKey, keyboard = false): void {
     if (!held || (key && held.key !== key)) return
     if (keyboard && held.keyboard) held.released = true
-    else if (!held.keyboard) { cancelInput(); inputNotice.value = 'Hold cancelled. Press 0 to repeat if needed.' }
+    else if (!held.keyboard) {
+      const short = held
+      cancelInput()
+      if (short.cause && short.priorDeadline !== null && state.conversations[short.cause]) {
+        state.conversations[short.cause] = short.priorDeadline > Date.now()
+          ? { phase: 'response', deadline: short.priorDeadline }
+          : { phase: 'paused', deadline: null }
+      }
+      inputNotice.value = `RELEASED TOO SOON — HOLD KEY ${short.key} TO AUTHORIZE`
+      const now = Date.now()
+      if (now - lastHoldCoachingAt >= 60000) {
+        const seconds = state.keypadProtection.holdSeconds
+        audio.cancelOptional()
+        audio.speak(holdCoachingCount === 0
+          ? `Captain, hold ${short.key} for ${seconds} ${seconds === 1 ? 'second' : 'seconds'} to authorize.`
+          : `Hold ${short.key} to confirm.`, 'terminal', 6)
+        lastHoldCoachingAt = now
+        holdCoachingCount++
+      }
+    }
   }
   function updateProtection(): void { cancelInput(); void persist() }
 
@@ -161,7 +184,7 @@ export function useFacility() {
   function announce(text: string, speaker = 'Facility Control', profileId = 'terminal', priority: AudioPriority = 3, context?: SpeechContext, event?: OperationalEvent): void {
     if (event && speaker !== 'Facility Control') text = crewReport(state, { ...event, summary: text })
     recordTranscript(text, speaker, priority, event)
-    if (priority === 1) { cancelInput(); pauseConversations(state) }
+    if (priority === 1) { audio.cancelOptional(); cancelInput(); pauseConversations(state) }
     if (context?.kind === 'request') {
       preparePrompt(state, context.cause)
       audio.speak(text, profileId, priority, context, {
@@ -607,6 +630,7 @@ export function useFacility() {
 
   return {
     beginKey, endKey, keypadKeydown, keypadKeyup, cancelInput, protectedKey, updateProtection, holdProgress, inputNotice, conversationStatus,
+    keyGuidance: (key: KeypadKey) => instructionForKey(key, 'this action', protectedKey(key), state.keypadProtection.holdSeconds),
     playInformation: (text: string) => { audio.cancelOptional(); audio.speak(text, 'terminal', 6) },
     stopInformation: () => audio.cancelOptional(),
     importing,

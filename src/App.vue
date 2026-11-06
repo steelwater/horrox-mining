@@ -11,7 +11,7 @@ import type { KeypadKey } from './game/types'
 
 const booting = ref(true)
 const {
-  beginKey, endKey, keypadKeydown, keypadKeyup, protectedKey, updateProtection, holdProgress, inputNotice, conversationStatus, playInformation, stopInformation,
+  beginKey, endKey, keypadKeydown, keypadKeyup, keyGuidance, updateProtection, holdProgress, inputNotice, conversationStatus, playInformation, stopInformation,
   importing,
   portableSnapshot,
   importSnapshot,
@@ -223,8 +223,8 @@ window.setTimeout(() => {
 
       <p v-if="conversationStatus" class="utility-message" role="status">{{ conversationStatus }}</p>
       <p v-if="inputNotice" class="utility-message" role="status">{{ inputNotice }}</p>
-      <progress v-if="holdProgress" :value="holdProgress" max="100" aria-label="Keypad protection progress">{{ holdProgress }}%</progress>
-      <p v-if="holdProgress">PROTECTION: {{ holdProgress }}%</p>
+      <progress v-if="holdProgress" :value="holdProgress" max="100" aria-label="Keypad protection progress">{{ Math.floor(holdProgress / 25) }} of 4 stages</progress>
+      <p v-if="holdProgress">HOLD TO AUTHORIZE — {{ Math.floor(holdProgress / 25) }} / 4</p>
       <section class="keypad" aria-label="Terminal keypad">
         <button
           v-for="key in keys"
@@ -232,7 +232,7 @@ window.setTimeout(() => {
           :disabled="importing"
           class="key"
           :aria-label="key === '*' ? 'Back or cancel' : key === '#' ? 'Confirm or enter' : `Key ${key}`"
-          :aria-description="protectedKey(key) ? 'Protected action. Hold on touch, or press and release, wait, then press again on keyboard.' : undefined"
+          :aria-description="keyGuidance(key)"
           @pointerdown="keypadPointer($event, key)"
           @pointerup="endKey(key)"
           @pointercancel="endKey(key)"
