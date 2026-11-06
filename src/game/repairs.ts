@@ -1,3 +1,4 @@
+import { responseDeadline } from './conversations'
 import { autonomyExplanation } from './crew'
 import { criticalPlaytestEnabled, CRITICAL_PLAYTEST_RUN_INTERVAL, CRITICAL_PLAYTEST_SEQUENCE } from './playtest'
 import { quantity } from './text'
@@ -144,10 +145,18 @@ export function droneStatus(state: FacilityState): string {
   return state.repairDrones.map((d) => `${d.name}: ${d.state.replaceAll('-', ' ')} at ${d.location}. ${d.targetId ? `Assigned to ${state.vessels.find((v) => v.id === d.targetId)?.name ?? d.targetId}.` : ''} ${d.maintenanceDue ? 'Maintenance required before reuse.' : 'Maintenance current.'}`).join(' ')
 }
 
-function diagnosticProgress(state: FacilityState, vessel: Vessel, job: RepairJob): string {
+export function diagnosticProgress(state: FacilityState, vessel: Vessel, job: RepairJob): string {
   const drone = state.repairDrones.find((item) => item.id === job.assignedDroneId)
   switch (job.state) {
-    case 'waiting': return 'Waiting for available repair resources. Service has not started.'
+    case 'waiting': {
+      if (state.repairJobs.some(other => other.id !== job.id && other.vesselId === vessel.id && other.state !== 'complete' && other.state !== 'waiting')) return 'Waiting for the other authorized repair on this vessel. Service has not started.'
+      if (job.method === 'dock' && vessel.dockingState === 'docked') {
+        const competing = state.repairJobs.some(other => other.id !== job.id && other.method === 'dock' && other.state === 'servicing')
+        if (state.systems.berth === 'isolated') return `Dock repair authorized. Berth Four remains isolated pending pressure inspection. ${vessel.name} is secured. ${competing ? 'Another dock repair also occupies the service crew.' : 'Dockside service remains queued for automatic start after clearance and dockside crew are available.'}`
+        if (competing) return 'Waiting for dockside crew to finish another authorized repair. Service has not started.'
+      }
+      return 'Waiting for available repair resources. Service has not started.'
+    }
     case 'dispatched': return `${drone!.name} assigned and dispatched. Service has not started.`
     case 'in-transit': return `${drone!.name} en route. Service has not started.`
     case 'returning-vessel': return `Returning for dockside service.${drone ? ` ${drone.name} providing recovery support.` : ''} Service has not started.`
@@ -159,7 +168,7 @@ function diagnosticProgress(state: FacilityState, vessel: Vessel, job: RepairJob
 
 export function decideRepair(state: FacilityState, vessel: Vessel, fault: VesselFault, action: RepairAction, at: number, actor = 'captain'): string {
   if (fault.resolvedAt !== null) return `${vessel.name}: service already complete.`
-  if (fault.decisionAt !== null && at >= fault.decisionAt && actor === 'captain') return decideRepair(state, vessel, fault, 'crew', at, 'facility')
+  if (fault.decisionAt !== null && at >= responseDeadline(state, fault.id, fault.decisionAt) && actor === 'captain') return decideRepair(state, vessel, fault, 'crew', at, 'facility')
   if (action === 'diagnostics') {
     const job = activeJob(state, fault)
     const progress = job ? ` Repair already authorized. ${diagnosticProgress(state, vessel, job)} No further Captain action is required for this repair.` : ''
@@ -171,6 +180,7 @@ export function decideRepair(state: FacilityState, vessel: Vessel, fault: Vessel
   if ((action === 'dock' || action === 'safe-return') && vessel.dockingState !== 'docked' && !canReturn(vessel)) return 'Self-powered return is unavailable. Request drone recovery.'
   const reason = action === 'crew' ? `${actor === 'facility' ? 'The response window elapsed. ' : 'Captain delegated the decision. '}${recommendation(state, vessel, fault).text} ${autonomyExplanation(state.miners.find((crew) => crew.id === vessel.minerId))}` : actor === 'facility' ? 'CRITICAL condition: Facility Control initiated the predefined safe response immediately.' : 'Captain selected the operational response.'
   if (action === 'crew') { action = recommendation(state, vessel, fault).action; actor = 'facility' }
+  delete state.conversations[fault.id]
   fault.action = action
   fault.decisionAt = null
   if (action === 'continue') return log(state, vessel, fault, at, 210, `Confirmed. ${vessel.name} continuing carefully. Reduced capability; service limit remains monitored.`, actor, action, reason)
@@ -248,13 +258,13 @@ function startService(state: FacilityState, job: RepairJob, vessel: Vessel, faul
   log(state, vessel, fault, at, 230, `${vessel.name}: ${faultLibrary[fault.type].requirements}. Service time ${elapsedMinutes(faultLibrary[fault.type].serviceMs / MINUTE)}.`, 'facility', null, 'Service began at the assigned location.', job)
 }
 export function repairDeadlines(state: FacilityState): number[] {
-  return [...state.repairJobs.map((j) => j.nextAt ?? Infinity), ...state.vessels.flatMap((v) => activeFaults(v).flatMap((f) => [f.decisionAt ?? Infinity, f.escalatesAt ?? Infinity]))]
+  return [...state.repairJobs.map((j) => j.nextAt ?? Infinity), ...state.vessels.flatMap((v) => activeFaults(v).flatMap((f) => [responseDeadline(state, f.id, f.decisionAt ?? Infinity), f.escalatesAt ?? Infinity]))]
 }
 export function advanceRepairs(state: FacilityState, at: number): void {
   for (const vessel of state.vessels) for (const fault of activeFaults(vessel)) {
     if (fault.severity === 'critical' && !activeJob(state, fault)) decideRepair(state, vessel, fault, recommendation(state, vessel, fault).action, at, 'facility')
     if (fault.escalatesAt !== null && fault.escalatesAt <= at) escalateFault(state, vessel, fault, at)
-    if (fault.decisionAt !== null && fault.decisionAt <= at) decideRepair(state, vessel, fault, 'crew', at, 'facility')
+    if (fault.decisionAt !== null && responseDeadline(state, fault.id, fault.decisionAt) <= at) decideRepair(state, vessel, fault, 'crew', at, 'facility')
   }
   for (const job of [...state.repairJobs].sort((a, b) => priority(state, b) - priority(state, a))) {
     if (job.nextAt === null || job.nextAt > at) continue

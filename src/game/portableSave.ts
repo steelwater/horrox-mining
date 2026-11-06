@@ -6,7 +6,7 @@ import { migrateFacility } from './persistence'
 import type { FacilityState, OperationalEvent, TranscriptEntry } from './types'
 
 export const SAVE_FORMAT = 'horrox-mining-portable-save'
-export const SAVE_SCHEMA = 5
+export const SAVE_SCHEMA = 6
 
 export function formatTranscript(entries: TranscriptEntry[]): string {
   return [`1st Horrox Mining Ltd. — ${buildLabel}`, ...[...entries].sort((a, b) => a.timestamp - b.timestamp)
@@ -60,7 +60,7 @@ function checkShape(value: unknown, sample: unknown, path: string, field = ''): 
     } else if (nullableText.has(field) ? typeof value !== 'string' : !numeric(value)) invalid(path)
   } else if (Array.isArray(sample)) {
     if (!Array.isArray(value)) invalid(path)
-    const item = samples[field] ?? sample[0] ?? ''
+    const item = samples[field === 'notableEvents' ? 'operations' : field] ?? sample[0] ?? ''
     value.forEach((entry, i) => checkShape(entry, item, `${path}[${i}]`))
   } else if (record(sample)) {
     if (!record(value)) invalid(path)
@@ -79,7 +79,7 @@ function same(a: unknown, b: unknown): boolean {
 }
 
 function legacyMatches(raw: unknown, migrated: unknown, field = ''): boolean {
-  if (field === 'version') return (raw === 3 || raw === 4) && migrated === 5
+  if (field === 'version') return (raw === 3 || raw === 4 || raw === 5) && migrated === 6
   if (field === 'condition' && raw === 'service-required') return migrated === 'nominal'
   if (field === 'miners' && Array.isArray(raw) && Array.isArray(migrated)) return raw.every((entry) => legacyMatches(entry, migrated.find((crew) => crew.id === entry.id)))
   if (Array.isArray(raw) && Array.isArray(migrated)) return raw.length === migrated.length && raw.every((entry, i) => legacyMatches(entry, migrated[i]))
@@ -93,12 +93,13 @@ export function parseSave(text: string, now = Date.now()): FacilityState {
   if (!record(envelope) || envelope.format !== SAVE_FORMAT) throw new Error('Not a Horrox portable save. Current operation unchanged.')
   // Portable envelopes support the living-mine schema and its repair successor.
   // Schema 1/2 installation saves still migrate through the normal load path.
-  if (envelope.schemaVersion !== 3 && envelope.schemaVersion !== 4 && envelope.schemaVersion !== SAVE_SCHEMA) throw new Error('Unsupported save schema. Supported portable schemas: 3, 4 and 5. Current operation unchanged.')
+  if (envelope.schemaVersion !== 3 && envelope.schemaVersion !== 4 && envelope.schemaVersion !== 5 && envelope.schemaVersion !== SAVE_SCHEMA) throw new Error('Unsupported save schema. Supported portable schemas: 3, 4, 5 and 6. Current operation unchanged.')
   if (typeof envelope.appVersion !== 'string' || !envelope.appVersion || !numeric(envelope.milestone)
     || typeof envelope.exportedAt !== 'string' || !Number.isFinite(Date.parse(envelope.exportedAt))) invalid('metadata')
   const raw = envelope.state
   if (!record(raw) || raw.version !== envelope.schemaVersion) invalid('state.version')
   const template = JSON.parse(JSON.stringify(createInitialState(now))) as RecordValue
+  if (raw.version !== 6) { delete template.conversations; delete template.keypadProtection; delete template.notableEvents }
   if (raw.version === 3 || raw.version === 4) {
     delete template.chatterMemory
     template.miners = (template.miners as RecordValue[]).slice(0, 3)

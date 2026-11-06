@@ -11,6 +11,8 @@ export type EventDefinition = {
   participants: string[]
   spokenLines: string[]
   responseOptions: Partial<Record<KeypadKey, string>>
+  choiceIds: Partial<Record<KeypadKey, string>>
+  operationCode?: number
   responseTimeoutMs: number
   autonomousFallback: string
   consequences: string[]
@@ -64,7 +66,10 @@ export type PendingEvent = {
 }
 
 export type FacilityState = {
-  version: 5
+  version: 6
+  conversations: Record<string, import('./conversations').ConversationClock>
+  keypadProtection: { mode: 'off' | 'critical' | 'all'; holdSeconds: number }
+  notableEvents: OperationalEvent[]
   chatterMemory: Record<string, number>
   operationStart: '2075-09-17'
   commissioned: boolean

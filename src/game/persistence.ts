@@ -1,8 +1,9 @@
+import { pruneConversations, type ConversationClock } from './conversations'
 import { restoreCrew } from './crewPersistence'
 import { readRepairRecord, restoreRepairs } from './repairPersistence'
 import { operationAgeAt } from './calendar'
 import { Preferences } from '@capacitor/preferences'
-import { commissionFacility, createInitialState, findEvent, restoreState, MAX_CATCHUP_MS } from './engine'
+import { commissionFacility, createInitialState, findEvent, restoreState, MAX_CATCHUP_MS, rememberNotableEvent } from './engine'
 import { onboardingSteps } from './onboarding'
 import type { FacilityState } from './types'
 
@@ -17,10 +18,10 @@ function choice<T extends string>(value: unknown, options: readonly T[], fallbac
 
 export function migrateFacility(raw: unknown, now: number): FacilityState {
   const saved = object(raw)
-  if (typeof saved.version === 'number' && saved.version > 5) throw new Error('This save needs a newer version of Horrox. It has not been replaced.')
+  if (typeof saved.version === 'number' && saved.version > 6) throw new Error('This save needs a newer version of Horrox. It has not been replaced.')
   const marker = Math.min(now, count(saved.lastProcessedAt, count(saved.lastSavedAt, now)))
   const state = createInitialState(marker)
-  if ((saved.version !== 3 && saved.version !== 4 && saved.version !== 5) || saved.commissioned === true || saved.onboardingStatus === 'complete' || saved.onboardingStatus === 'skipped') {
+  if ((saved.version !== 3 && saved.version !== 4 && saved.version !== 5 && saved.version !== 6) || saved.commissioned === true || saved.onboardingStatus === 'complete' || saved.onboardingStatus === 'skipped') {
     commissionFacility(state, marker)
   }
   const timestamp = (value: unknown, fallback: number) => Math.min(count(value, fallback), now)
@@ -35,7 +36,7 @@ export function migrateFacility(raw: unknown, now: number): FacilityState {
   for (const field of ['facilityAgeMs', 'productionCycles', 'oreProcessed', 'equipmentWear'] as const) state[field] = count(saved[field], state[field])
   state.autopilotEnabled = saved.autopilotEnabled === true
   state.onboardingStatus = choice(saved.onboardingStatus, ['pending', 'active', 'complete', 'skipped'], 'pending')
-  state.onboardingStep = (saved.version === 3 || saved.version === 4 || saved.version === 5) ? Math.min(onboardingSteps.length - 1, Math.floor(count(saved.onboardingStep, 0))) : 0
+  state.onboardingStep = (saved.version === 3 || saved.version === 4 || saved.version === 5 || saved.version === 6) ? Math.min(onboardingSteps.length - 1, Math.floor(count(saved.onboardingStep, 0))) : 0
   state.history = strings(saved.history).slice(-100)
   state.eventCooldowns = Object.fromEntries(Object.entries(object(saved.eventCooldowns)).filter(([id, at]) => findEvent(id) && typeof at === 'number' && Number.isFinite(at) && at <= now + MAX_CATCHUP_MS)) as Record<string, number>
   const pending = object(saved.pendingEvent)
@@ -97,11 +98,15 @@ export function migrateFacility(raw: unknown, now: number): FacilityState {
     return typeof q.id === 'string' && typeof q.vesselId === 'string' && state.vessels.some((v) => v.id === q.vesselId)
       ? [{ id: q.id, vesselId: q.vesselId, tonnes: Math.min(16, count(q.tonnes, 0)), completesAt: deadline(q.completesAt, marker + 180_000) ?? marker + 180_000 }] : []
   }).slice(0, 100)
-  if (Array.isArray(saved.operations)) state.operations = saved.operations.flatMap((entry) => {
+  const readOperations = (entries: unknown[]) => entries.flatMap((entry) => {
     const e = object(entry)
     const repair = readRepairRecord(e.repair)
     return typeof e.id === 'string' && typeof e.summary === 'string' && typeof e.source === 'string' ? [{ id: e.id, ...(typeof e.operationCode === 'number' ? { operationCode: e.operationCode } : {}), ...(repair ? { repair } : {}), summary: e.summary, source: e.source, timestamp: timestamp(e.timestamp, marker), operationAgeMs: count(e.operationAgeMs, operationAgeAt(state, timestamp(e.timestamp, marker))), category: choice(e.category, ['mining', 'docking', 'maintenance', 'problem', 'safety', 'chatter', 'processing', 'command'], 'problem'), relatedIds: strings(e.relatedIds), actionRequested: e.actionRequested === true, resolution: choice(e.resolution, ['pending', 'manual', 'autonomous'], 'autonomous'), reason: typeof e.reason === 'string' ? e.reason : null }] : []
-  }).slice(-1000).sort((a, b) => a.timestamp - b.timestamp)
+  }).sort((a, b) => a.timestamp - b.timestamp)
+  state.operations = Array.isArray(saved.operations) ? readOperations(saved.operations).slice(-1000) : []
+  state.notableEvents = []
+  if (saved.version === 6 && Array.isArray(saved.notableEvents)) readOperations(saved.notableEvents).forEach(e => rememberNotableEvent(state, e))
+  else state.operations.forEach(e => rememberNotableEvent(state, e))
   state.nextOperationId = Math.max(1, Math.floor(count(saved.nextOperationId, 1)), ...state.operations.map((e) => count(Number(e.id.replace('op-', '')), 0) + 1))
   if (Array.isArray(saved.transcript)) state.transcript = saved.transcript.flatMap((entry) => {
     const e = object(entry)
@@ -109,6 +114,17 @@ export function migrateFacility(raw: unknown, now: number): FacilityState {
   }).slice(-80)
   restoreRepairs(state, saved)
   restoreCrew(state, saved)
+  if (saved.version === 6) {
+    const settings = object(saved.keypadProtection)
+    state.keypadProtection = { mode: choice(settings.mode, ['off', 'critical', 'all'], 'critical'), holdSeconds: Math.max(1, Math.min(5, Math.floor(count(settings.holdSeconds, 3)))) }
+    for (const [cause, value] of Object.entries(object(saved.conversations))) {
+      const clock = object(value)
+      if (!['prompt', 'response', 'paused', 'holding'].includes(clock.phase as string)) throw new Error('Invalid conversation clock.')
+      if (clock.phase === 'response' ? typeof clock.deadline !== 'number' || !Number.isFinite(clock.deadline) || clock.deadline < 0 : clock.deadline !== null) throw new Error('Invalid conversation deadline.')
+      state.conversations[cause] = { phase: clock.phase, deadline: clock.deadline } as ConversationClock
+    }
+    pruneConversations(state)
+  }
   return state
 }
 
