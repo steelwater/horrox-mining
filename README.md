@@ -255,3 +255,7 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" npm run 
 Playtest bundles contain `playtest-build.json`. Android release builds reject synced assets with this marker; run `npm run cap:sync` to rebuild and sync normal assets before a release build. This guard does not sign or publish a release. To disable accelerated faults for a debug APK, use normal `npm run cap:sync` followed by the existing Gradle `assembleDebug` task.
 
 Reconnects after at least 30 minutes summarize retained extraction, delivery, processing, service, inspection, fault and decision activity plus current status. If the bounded history cannot cover the entire absence, totals explicitly say they cover retained records. Detailed chronology remains in operational history. Dock repair follows only remaining real travel/docking transitions; a secured vessel starts service when its berth is clear without replaying arrival codes.
+
+## Audio-first keypad guidance (review branch)
+
+Protected repair menus now announce authorization instructions according to the selected protection mode and hold interval (1–5 seconds). On touch, hold the key; on a physical or Bluetooth keyboard, press, release, wait and deliberately press again. Early releases receive a high-contrast UI notice and optional rate-limited coaching, without an operational log entry. Critical audio interrupts coaching. Captain hardware acceptance remains pending. [Task brief](https://docs.google.com/document/d/1OPjcKEdE2UuNrkaRK1_eJ70IKm87KMQKo2hkqzhODFc/edit).
