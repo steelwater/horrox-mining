@@ -11,7 +11,7 @@ import type { KeypadKey } from './game/types'
 
 const booting = ref(true)
 const {
-  beginKey, endKey, keypadKeydown, keypadKeyup, protectedKey, keyGuidance, updateProtection, holdProgress, inputNotice, conversationStatus, playInformation, stopInformation,
+  beginKey, endKey, keypadKeydown, keypadKeyup, keyGuidance, updateProtection, holdProgress, inputNotice, conversationStatus, playInformation, stopInformation,
   importing,
   portableSnapshot,
   importSnapshot,
