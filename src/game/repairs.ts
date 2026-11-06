@@ -1,3 +1,4 @@
+import { instructionForKey, repairActionProtected } from './keypadGuidance'
 import { responseDeadline } from './conversations'
 import { autonomyExplanation } from './crew'
 import { criticalPlaytestEnabled, CRITICAL_PLAYTEST_RUN_INTERVAL, CRITICAL_PLAYTEST_SEQUENCE } from './playtest'
@@ -139,7 +140,7 @@ export function repairMenu(state: FacilityState, vessel: Vessel, fault: VesselFa
   const navigation = index >= 0 && index < faults.length - 1
     ? 'Press # for next vessel fault.'
     : 'No additional vessel faults. Press 0 for current repair choices.'
-  return `${vesselRepairStatus(state, vessel, fault)} ${Object.entries(repairOptions(state, vessel, fault)).map(([key, option]) => `Press ${key} for ${option.label.toLowerCase()}.`).join(' ')} ${navigation} Star returns to the main terminal.`
+  return `${vesselRepairStatus(state, vessel, fault)} ${Object.entries(repairOptions(state, vessel, fault)).map(([key, option]) => instructionForKey(key as KeypadKey, option.label, repairActionProtected(state, option.action), state.keypadProtection.holdSeconds)).join(' ')} ${navigation} Star returns to the main terminal.`
 }
 export function droneStatus(state: FacilityState): string {
   return state.repairDrones.map((d) => `${d.name}: ${d.state.replaceAll('-', ' ')} at ${d.location}. ${d.targetId ? `Assigned to ${state.vessels.find((v) => v.id === d.targetId)?.name ?? d.targetId}.` : ''} ${d.maintenanceDue ? 'Maintenance required before reuse.' : 'Maintenance current.'}`).join(' ')
