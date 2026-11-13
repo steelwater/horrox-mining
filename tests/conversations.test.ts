@@ -73,6 +73,53 @@ describe('conversational response clocks', () => {
     expect(repairOptions(state, vessel, fault)['2']).toBeUndefined()
     expect(conversationIdentity(state, fault.id)).toMatchObject({ originatorId: 'sol-arden', vesselId: vessel.id, safeDefault: 'crew' })
   })
+  it('safely resolves a paused repair after its original five-minute decision deadline', () => {
+    const state = operation()
+    const vessel = state.vessels[0]!
+    const fault = detectFault(state, vessel.id, 'communications-failure', start)!
+    preparePrompt(state, fault.id)
+    pauseConversations(state)
+    advanceFacility(state, start + 5 * minute - 1)
+    expect(fault.action).toBeNull()
+    expect(state.repairJobs).toHaveLength(0)
+    advanceFacility(state, start + 5 * minute)
+    expect(fault.action).not.toBeNull()
+    expect(fault.decisionAt).toBeNull()
+    expect(state.conversations[fault.id]).toBeUndefined()
+    const decisions = state.operations.filter(e => e.repair?.faultId === fault.id && e.actionRequested && e.resolution === 'autonomous')
+    expect(decisions).toHaveLength(1)
+    advanceFacility(state, start + 7 * minute)
+    expect(state.operations.filter(e => e.repair?.faultId === fault.id && e.actionRequested && e.resolution === 'autonomous')).toHaveLength(1)
+  })
+  it('recovers a paused repair on reload and never replays the autonomous decision', () => {
+    const state = operation()
+    const vessel = state.vessels[0]!
+    const fault = detectFault(state, vessel.id, 'communications-failure', start)!
+    preparePrompt(state, fault.id)
+    pauseConversations(state)
+    const saved = exportSave(state, start + minute)
+    const restored = restoreState(parseSave(saved, start + minute), start + 6 * minute).state
+    const repairedFault = restored.vessels[0]!.activeFaults.find(f => f.id === fault.id)!
+    expect(repairedFault.action).not.toBeNull()
+    expect(restored.conversations[fault.id]).toBeUndefined()
+    const decisions = () => restored.operations.filter(e => e.repair?.faultId === fault.id && e.actionRequested && e.resolution === 'autonomous')
+    expect(decisions()).toHaveLength(1)
+    advanceFacility(restored, start + 8 * minute)
+    expect(decisions()).toHaveLength(1)
+  })
+  it('preserves the full spoken response window for a live repair prompt', () => {
+    const state = operation()
+    const vessel = state.vessels[0]!
+    const fault = detectFault(state, vessel.id, 'communications-failure', start)!
+    preparePrompt(state, fault.id)
+    advanceFacility(state, start + 6 * minute)
+    expect(fault.action).toBeNull()
+    finishPrompt(state, fault.id, start + 6 * minute, false)
+    advanceFacility(state, start + 6 * minute + 14_999)
+    expect(fault.action).toBeNull()
+    advanceFacility(state, start + 6 * minute + 15_000)
+    expect(fault.action).not.toBeNull()
+  })
   it('migrates an actual schema-five shape and preserves crew, work, and preference defaults', () => {
     const state = operation()
     const envelope = JSON.parse(exportSave(state, start))
