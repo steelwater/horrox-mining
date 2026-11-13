@@ -1,4 +1,4 @@
-import { responseDeadline } from './conversations'
+import { repairDecisionDeadline } from './conversations'
 import { autonomyExplanation } from './crew'
 import { criticalPlaytestEnabled, CRITICAL_PLAYTEST_RUN_INTERVAL, CRITICAL_PLAYTEST_SEQUENCE } from './playtest'
 import { quantity } from './text'
@@ -168,7 +168,7 @@ export function diagnosticProgress(state: FacilityState, vessel: Vessel, job: Re
 
 export function decideRepair(state: FacilityState, vessel: Vessel, fault: VesselFault, action: RepairAction, at: number, actor = 'captain'): string {
   if (fault.resolvedAt !== null) return `${vessel.name}: service already complete.`
-  if (fault.decisionAt !== null && at >= responseDeadline(state, fault.id, fault.decisionAt) && actor === 'captain') return decideRepair(state, vessel, fault, 'crew', at, 'facility')
+  if (fault.decisionAt !== null && at >= repairDecisionDeadline(state, fault.id, fault.decisionAt) && actor === 'captain') return decideRepair(state, vessel, fault, 'crew', at, 'facility')
   if (action === 'diagnostics') {
     const job = activeJob(state, fault)
     const progress = job ? ` Repair already authorized. ${diagnosticProgress(state, vessel, job)} No further Captain action is required for this repair.` : ''
@@ -258,13 +258,13 @@ function startService(state: FacilityState, job: RepairJob, vessel: Vessel, faul
   log(state, vessel, fault, at, 230, `${vessel.name}: ${faultLibrary[fault.type].requirements}. Service time ${elapsedMinutes(faultLibrary[fault.type].serviceMs / MINUTE)}.`, 'facility', null, 'Service began at the assigned location.', job)
 }
 export function repairDeadlines(state: FacilityState): number[] {
-  return [...state.repairJobs.map((j) => j.nextAt ?? Infinity), ...state.vessels.flatMap((v) => activeFaults(v).flatMap((f) => [responseDeadline(state, f.id, f.decisionAt ?? Infinity), f.escalatesAt ?? Infinity]))]
+  return [...state.repairJobs.map((j) => j.nextAt ?? Infinity), ...state.vessels.flatMap((v) => activeFaults(v).flatMap((f) => [repairDecisionDeadline(state, f.id, f.decisionAt ?? Infinity), f.escalatesAt ?? Infinity]))]
 }
 export function advanceRepairs(state: FacilityState, at: number): void {
   for (const vessel of state.vessels) for (const fault of activeFaults(vessel)) {
     if (fault.severity === 'critical' && !activeJob(state, fault)) decideRepair(state, vessel, fault, recommendation(state, vessel, fault).action, at, 'facility')
     if (fault.escalatesAt !== null && fault.escalatesAt <= at) escalateFault(state, vessel, fault, at)
-    if (fault.decisionAt !== null && responseDeadline(state, fault.id, fault.decisionAt) <= at) decideRepair(state, vessel, fault, 'crew', at, 'facility')
+    if (fault.decisionAt !== null && repairDecisionDeadline(state, fault.id, fault.decisionAt) <= at) decideRepair(state, vessel, fault, 'crew', at, 'facility')
   }
   for (const job of [...state.repairJobs].sort((a, b) => priority(state, b) - priority(state, a))) {
     if (job.nextAt === null || job.nextAt > at) continue
