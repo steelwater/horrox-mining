@@ -16,6 +16,35 @@ function setup(type: FaultType = 'sensor-degradation') {
   return { state, vessel, fault }
 }
 
+describe('spoken repair menu choices', () => {
+  it('uses one explanation for critical protected commands and derives offered labels', () => {
+    const { state, vessel, fault } = setup('communications-failure')
+    state.keypadProtection.mode = 'critical'
+    const menu = repairMenu(state, vessel, fault)
+    expect(menu.match(/on touch/g)).toHaveLength(1)
+    expect(menu).toContain('Press 1 for diagnostics.')
+    expect(menu).toContain('Press 8 for facility recommendation.')
+    expect(menu).toContain('2: dispatch repair drone.')
+  })
+  it('does not claim a drone is dispatchable when it must queue', () => {
+    const { state, vessel, fault } = setup('communications-failure')
+    for (const drone of state.repairDrones) drone.state = 'dispatched'
+    const menu = repairMenu(state, vessel, fault)
+    expect(menu).toContain('2: queue drone support.')
+    expect(menu).not.toContain('2: dispatch repair drone.')
+  })
+  it('speaks no hold guide in off mode and protects diagnostics in all mode', () => {
+    const { state, vessel, fault } = setup('communications-failure')
+    state.keypadProtection.mode = 'off'
+    expect(repairMenu(state, vessel, fault)).toContain('Press 2 for dispatch repair drone.')
+    expect(repairMenu(state, vessel, fault)).not.toContain('Protected choices')
+    state.keypadProtection.mode = 'all'
+    const menu = repairMenu(state, vessel, fault)
+    expect(menu).toContain('1: diagnostics.')
+    expect(menu).not.toContain('Press 1 for diagnostics.')
+  })
+})
+
 describe('vessel faults and safe decisions', () => {
   it.each(Object.keys(faultLibrary) as FaultType[])('explains and persists %s with subsystem effects', (type) => {
     const { state, vessel, fault } = setup(type)
