@@ -298,6 +298,24 @@ For Android builds on this machine, use Android Studio's bundled JDK:
 JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" npm run android:debug
 ```
 
+Or run the helper from the repository root:
+
+```sh
+./build-apk.sh
+```
+
+The helper builds the currently checked-out branch, including uncommitted changes,
+using the existing debug playtest build. It prints the branch/commit, rebuilds web
+assets, syncs Android, and assembles the APK. It uses Android Studio's bundled JDK
+on macOS when `JAVA_HOME` is unset. Install dependencies with `npm ci` first;
+Node.js 24, a compatible JDK (CI uses Java 21), and the Android SDK are required.
+You can also invoke the script by its full path from another directory.
+
+The output is `android/app/build/outputs/apk/debug/app-debug.apk`; subsequent builds
+replace that local output. This is a debug-signed APK with critical playtest mode
+enabled, matching `npm run android:debug`. The helper does not switch branches or
+commit changes. Keep this script on branches where you want to use it.
+
 
 ### Critical incident playtest builds
 
