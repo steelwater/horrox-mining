@@ -549,7 +549,8 @@ describe('spoken terminal commands', () => {
     const fault = detectFault(facility.state, vessel.id, 'sensor-degradation', Date.now())!
     const deadline = fault.decisionAt
     await facility.pressKey('3')
-    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Press 2 for dispatch repair drone')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('Protected choices: on touch, hold the chosen key for 3 seconds.')
+    expect(speech.speak.mock.calls.at(-1)![0]).toContain('2: dispatch repair drone.')
     await facility.pressKey('1')
     expect(speech.speak.mock.calls.at(-1)![0]).toContain('2 0 1. Diagnostics requested')
     await facility.pressKey('0')
