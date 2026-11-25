@@ -44,6 +44,15 @@ describe('vessel faults and safe decisions', () => {
     expect(repairMenu(state, vessel, fault)).not.toContain('continue carefully')
   })
 
+  it('speaks a natural dock-return status without implying service already started', () => {
+    const { state, vessel, fault } = setup('communications-failure')
+    decideRepair(state, vessel, fault, 'dock', start)
+    const report = repairMenu(state, vessel, fault)
+    expect(report).toContain('is returning to Berth Four for authorized dockside repair')
+    expect(report).toContain('Service has not started')
+    expect(report).not.toContain('Dock repair returning vessel')
+  })
+
   it('waits five minutes then safely resolves a thruster fault without player input', () => {
     const { state, vessel, fault } = setup('thruster-malfunction')
     advanceFacility(state, start + 5 * minute - 1)

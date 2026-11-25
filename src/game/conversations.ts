@@ -11,6 +11,12 @@ export function responseDeadline(state: FacilityState, cause: string, fallback: 
   const clock = state.conversations[cause]
   return clock ? clock.phase === 'response' ? clock.deadline ?? Infinity : Infinity : fallback
 }
+/** A paused audio prompt must not suspend the underlying repair safety deadline. */
+export function repairDecisionDeadline(state: FacilityState, cause: string, fallback: number): number {
+  const clock = state.conversations[cause]
+  return clock?.phase === 'paused' ? fallback : responseDeadline(state, cause, fallback)
+}
+
 export function preparePrompt(state: FacilityState, cause: string): void {
   state.conversations[cause] = { phase: 'prompt', deadline: null }
 }
