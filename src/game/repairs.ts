@@ -137,7 +137,7 @@ export function vesselRepairStatus(state: FacilityState, vessel: Vessel, fault: 
         : job.state === 'waiting' ? 'Dockside repair authorized; waiting for berth clearance or available crew. Service has not started.'
           : job.state === 'servicing' ? `Dockside crew are repairing ${vessel.name}.`
             : job.state === 'complete' ? 'Dockside repair complete.' : 'Dockside repair authorized; service is being arranged.'
-    : `Repair Drone One support: ${job.state.replaceAll('-', ' ')}.`
+    : `Drone support: ${job.state.replaceAll('-', ' ')}.`
     : fault.action === 'continue' ? 'Continuing carefully at reduced capacity.' : 'Safe response available.'
   return codeReport(fault.operationCode, `${vessel.name}. ${faultLibrary[fault.type].name}. Condition ${vessel.condition.toUpperCase()}. ${progress}`)
 }
